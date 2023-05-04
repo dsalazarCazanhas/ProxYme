@@ -1,7 +1,9 @@
 # Created by https://www.toptal.com/developers/gitignore/api/python,qt,windows,virtualenv
 # Edit at https://www.toptal.com/developers/gitignore?templates=python,qt,windows,virtualenv
 cntlm/
-
+# Default ignored files
+/shelf/
+/workspace.xml
 ### Python ###
 # Byte-compiled / optimized / DLL files
 __pycache__/
