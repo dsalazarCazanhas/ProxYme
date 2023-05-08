@@ -1,15 +1,15 @@
 # ***Imports***
 # Local
-from classes.qt import widgets
+from classes.qt.mainwindow import MainWindow
 # Core
 import sys
 # Third
-from PySide6 import QtWidgets
+from PySide6.QtWidgets import QApplication
 
 
 def main():
-    app = QtWidgets.QApplication([])
-    main_box = widgets.MainWindow()
+    app = QApplication()
+    main_box = MainWindow()
     main_box.show()
     sys.exit(app.exec())
 
