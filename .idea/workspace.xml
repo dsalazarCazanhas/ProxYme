@@ -5,8 +5,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="c4bd44f0-6a63-4569-9262-d0a456547f2b" name="Changes" comment="Some Changes">
-      <change afterPath="$PROJECT_DIR$/classes/qt/mainwindow.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/classes/qt/mainwindow.py" beforeDir="false" afterPath="$PROJECT_DIR$/classes/qt/main_window.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/classes/qt/widgets.py" beforeDir="false" afterPath="$PROJECT_DIR$/classes/qt/widgets.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
     </list>

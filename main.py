@@ -1,6 +1,6 @@
 # ***Imports***
 # Local
-from classes.qt.mainwindow import MainWindow
+from classes.qt.main_window import MainWindow
 # Core
 import sys
 # Third
@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication
 
 def main():
     app = QApplication()
-    main_box = MainWindow()
+    main_box = MainWindow(app)
     main_box.show()
     sys.exit(app.exec())
 
