@@ -4,7 +4,7 @@ from .widgets import TabBar
 # Core
 import os
 # Third
-from PySide6 import QtGui
+from PySide6 import QtGui, QtCore
 from PySide6.QtWidgets import QMainWindow, QToolBar
 
 icon = os.path.dirname(os.path.realpath(__file__))
@@ -27,14 +27,19 @@ class MainWindow(QMainWindow):
         # lang_menu = menu_bar.addMenu("&Lang")
         # lang_menu.addAction("English")
         # lang_menu.addAction("Spanish")
-        about_menu = menu_bar.addMenu("&About")
-        about_menu.addAction("License")
-        about_menu.addAction("Version")
+        about_menu = menu_bar.addMenu("&Help")
+        about_menu.addAction("About")
 
         # Widgets
         tab_bar = TabBar()
         self.setCentralWidget(tab_bar)
 
         # toolbar = QToolBar("My main toolbar")
+        toolbar = QToolBar("My main toolbar")
+        toolbar.setIconSize(QtCore.QSize(16, 16))
+        self.addToolBar(toolbar)
+
+        toolbar.addAction(quit_action)
+
     def quit_app(self):
         self.app.quit()

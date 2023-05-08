@@ -18,3 +18,5 @@ class TabBar(QWidget):
         self.main_layout.addWidget(self._bar, 0, QtCore.Qt.AlignmentFlag.AlignTop)
         self.setLayout(self.main_layout)
 
+    def tab_change(self):
+        print("the tab changes")
