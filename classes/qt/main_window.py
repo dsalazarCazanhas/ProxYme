@@ -34,7 +34,7 @@ class MainWindow(QMainWindow):
         tab_bar = TabBar()
         self.setCentralWidget(tab_bar)
 
-        # toolbar = QToolBar("My main toolbar")
+        # toolbar ***This will be removed later!!!! cuz not needed at the moment***
         toolbar = QToolBar("My main toolbar")
         toolbar.setIconSize(QtCore.QSize(16, 16))
         self.addToolBar(toolbar)
