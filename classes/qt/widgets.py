@@ -13,6 +13,7 @@ class TabBar(QWidget):
     def __init__(self):
         super().__init__()
         self.main_layout = QHBoxLayout()
+        self.button_layout = QVBoxLayout()
         # self._bar = QTabBar()
         tab_bar = QTabWidget(self)
 
@@ -30,10 +31,9 @@ class TabBar(QWidget):
         # settings_layout.addRow('Password: ', QLineEdit(self))
 
         start_button = QPushButton("Start")
-
         tab_bar.addTab(home, "Home")
         tab_bar.addTab(settings, "Settings")
         self.main_layout.addWidget(tab_bar, 0, QtCore.Qt.AlignmentFlag.AlignTop)
-        self.main_layout.addWidget(start_button, 0, QtCore.Qt.AlignmentFlag.AlignBottom)
+        self.main_layout.addChildLayout(self.button_layout)
+        self.main_layout.addWidget(start_button)
         self.setLayout(self.main_layout)
-

@@ -5,7 +5,7 @@ from .widgets import TabBar
 import os
 # Third
 from PySide6 import QtGui, QtCore
-from PySide6.QtWidgets import QMainWindow, QToolBar
+from PySide6.QtWidgets import QMainWindow, QToolBar, QPushButton
 
 icon = os.path.dirname(os.path.realpath(__file__))
 
@@ -39,7 +39,10 @@ class MainWindow(QMainWindow):
         toolbar.setIconSize(QtCore.QSize(16, 16))
         self.addToolBar(toolbar)
 
+        # Button Box
+
         toolbar.addAction(quit_action)
 
     def quit_app(self):
         self.app.quit()
+
