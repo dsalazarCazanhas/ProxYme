@@ -40,7 +40,6 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
         # Button Box
-
         toolbar.addAction(quit_action)
 
     def quit_app(self):
