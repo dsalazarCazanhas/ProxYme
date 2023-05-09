@@ -16,7 +16,7 @@ class MainWindow(QMainWindow):
         # Init Main Window
         self.app = app
         self.setWindowTitle('ProxYTensei')
-        self.resize(450, 325)
+        self.resize(512, 256)
         self.setWindowIcon(QtGui.QIcon(icon + os.path.sep + 'icon2.png'))
 
         # Menubar and Menus
