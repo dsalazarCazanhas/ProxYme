@@ -1,7 +1,7 @@
 # Created by https://www.toptal.com/developers/gitignore/api/python,qt,windows,virtualenv
 # Edit at https://www.toptal.com/developers/gitignore?templates=python,qt,windows,virtualenv
 # Default ignored files
-.idea/*
+.idea
 
 ### Python ###
 # Byte-compiled / optimized / DLL files
