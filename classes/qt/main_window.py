@@ -1,13 +1,12 @@
 # ***Imports***
 # Local
 from .widgets import TabBar
+from .metas import icon
 # Core
-import os
+
 # Third
 from PySide6 import QtGui, QtCore
-from PySide6.QtWidgets import QMainWindow, QToolBar, QStatusBar, QWidget
-
-icon = os.path.dirname(os.path.realpath(__file__))
+from PySide6.QtWidgets import QMainWindow, QToolBar, QStatusBar
 
 
 class MainWindow(QMainWindow):
@@ -17,7 +16,7 @@ class MainWindow(QMainWindow):
         self.app = app
         self.setWindowTitle('ProxYTensei')
         self.resize(512, 256)
-        self.setWindowIcon(QtGui.QIcon(icon + os.path.sep + 'icon2.png'))
+        self.setWindowIcon(QtGui.QIcon(icon['window_icon']))
 
         # Menubar and Menus
         menu_bar = self.menuBar()
