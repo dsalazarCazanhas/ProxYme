@@ -1,11 +1,11 @@
 # ***Imports***
 # Local
+from .metas import icon
 # Core
-import os
+
 # Third
-from PySide6 import QtCore
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTabBar, QTabWidget, QFormLayout, QLineEdit,\
-    QBoxLayout, QLabel, QPushButton, QCheckBox
+from PySide6 import QtCore, QtGui
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QTabWidget, QFormLayout, QLineEdit, QPushButton, QCheckBox
 
 
 class TabBar(QWidget):
@@ -26,16 +26,24 @@ class TabBar(QWidget):
 
         username_format = QLineEdit()
         username_format.setPlaceholderText('username')
-        password_format = QLineEdit()
-        password_format.setPlaceholderText('password')
-        password_format.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_format = QLineEdit()
+        self.password_format.setPlaceholderText('password')
+        self.password_format.setEchoMode(QLineEdit.EchoMode.Password)
+        # Widget with the action to see the password
+        self.eye_icon_closed = QtGui.QIcon(icon['icon_eye_closed'])
+        self.showPassAction = QtGui.QAction(self.eye_icon_closed, 'Show Password', self)
+        self.password_format.addAction(
+            self.showPassAction, QLineEdit.ActionPosition.TrailingPosition)
+        self.showPassAction.setCheckable(True)
+        self.showPassAction.toggled.connect(self.show_password)
+        # Remember credentials checkable button
         self.remember_credentials_button = QCheckBox('Remember credentials')
         self.remember_credentials_button.stateChanged.connect(self.credential_button_checked)
 
         # Build the tab
         home.setLayout(home_layout)
         home_layout.addRow('Username: ', username_format)
-        home_layout.addRow('Password: ', password_format)
+        home_layout.addRow('Password: ', self.password_format)
         home_layout.addWidget(self.remember_credentials_button)
         home_layout.addWidget(start_button)
         home_layout.setFormAlignment(QtCore.Qt.AlignmentFlag.AlignJustify)
@@ -53,7 +61,12 @@ class TabBar(QWidget):
         print("Pressed button")
 
     def credential_button_checked(self):
-        if self.remember_credentials_button.isChecked():
-            print("Is checked")
+        print("Checked" if self.remember_credentials_button.isChecked() else "Is unchecked")
+
+    def show_password(self, show):
+        if show:
+            self.showPassAction.setIcon(QtGui.QIcon(icon['icon_eye_opened']))
+            self.password_format.setEchoMode(QLineEdit.EchoMode.Normal)
         else:
-            print("Is unchecked")
+            self.showPassAction.setIcon(self.eye_icon_closed)
+            self.password_format.setEchoMode(QLineEdit.EchoMode.Password)
