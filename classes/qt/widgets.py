@@ -26,8 +26,11 @@ class TabBar(QWidget):
 
         username_format = QLineEdit()
         username_format.setPlaceholderText('username')
+        username_format.setStyleSheet("color: black;")
+        username_format.setStyleSheet('background-color:grey')
         self.password_format = QLineEdit()
         self.password_format.setPlaceholderText('password')
+        self.password_format.setStyleSheet('background-color: grey')
         self.password_format.setEchoMode(QLineEdit.EchoMode.Password)
         # Widget with the action to see the password
         self.eye_icon_closed = QtGui.QIcon(icon['icon_eye_closed'])
