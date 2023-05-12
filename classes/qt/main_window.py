@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QMainWindow, QToolBar, QStatusBar
 class MainWindow(QMainWindow):
     def __init__(self, app):
         super().__init__()
+
         # Init Main Window
         self.app = app
         self.setWindowTitle('ProxYTensei')

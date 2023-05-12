@@ -1,6 +1,7 @@
 # ***Imports***
 # Local
 from classes.qt.main_window import MainWindow
+from classes.qt.widgets import TabBar
 # Core
 import sys
 # Third

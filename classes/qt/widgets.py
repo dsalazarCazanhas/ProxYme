@@ -12,25 +12,27 @@ class TabBar(QWidget):
     def __init__(self):
         super().__init__()
 
+        # Init Layout and the tab bar
         self.main_layout = QHBoxLayout()
-        tab_bar = QTabWidget(self)
+        self.tab_bar = QTabWidget(self)
 
         # Home Tab config
-        home = QWidget(self)
-        home_layout = QFormLayout()
+        self.home = QWidget(self)
+        self.home_layout = QFormLayout()
 
-        start_button = QPushButton("Start")
-        start_button.setStyleSheet('background-color:grey')
-        # self.start_button.autoDefault()
-        start_button.clicked.connect(self.start_button_on_click)
+        # Start Button
+        self.start_button = QPushButton("&Start")
+        self.start_button.setStyleSheet('Color: Black')
+        self.start_button.clicked.connect(self.start_button_on_click)
 
-        username_format = QLineEdit()
-        username_format.setPlaceholderText('username')
-        username_format.setStyleSheet("color: black;")
-        username_format.setStyleSheet('background-color:grey')
+        # Home tab fields and configs
+        # Username
+        self.username_format = QLineEdit()
+        self.username_format.setStyleSheet('color: black')
+        self.username_format.setPlaceholderText('username')
+        # Password
         self.password_format = QLineEdit()
         self.password_format.setPlaceholderText('password')
-        self.password_format.setStyleSheet('background-color: grey')
         self.password_format.setEchoMode(QLineEdit.EchoMode.Password)
         # Widget with the action to see the password
         self.eye_icon_closed = QtGui.QIcon(icon['icon_eye_closed'])
@@ -43,25 +45,28 @@ class TabBar(QWidget):
         self.remember_credentials_button = QCheckBox('Remember credentials')
         self.remember_credentials_button.stateChanged.connect(self.credential_button_checked)
 
-        # Build the tab
-        home.setLayout(home_layout)
-        home_layout.addRow('Username: ', username_format)
-        home_layout.addRow('Password: ', self.password_format)
-        home_layout.addWidget(self.remember_credentials_button)
-        home_layout.addWidget(start_button)
-        home_layout.setFormAlignment(QtCore.Qt.AlignmentFlag.AlignJustify)
+        # Building the home tab
+        self.home.setLayout(self.home_layout)
+        self.home_layout.addRow('Username: ', self.username_format)
+        self.home_layout.addRow('Password: ', self.password_format)
+        self.home_layout.addWidget(self.remember_credentials_button)
+        self.home_layout.addWidget(self.start_button)
+        self.home_layout.setFormAlignment(QtCore.Qt.AlignmentFlag.AlignJustify)
 
+        # Settings tab
         settings = QWidget(self)
         settings_layout = QFormLayout()
         settings.setLayout(settings_layout)
 
-        tab_bar.addTab(home, "Home")
-        tab_bar.addTab(settings, "Settings")
-        self.main_layout.addWidget(tab_bar, 0, QtCore.Qt.AlignmentFlag.AlignTop)
+        # Adding the configs to the Bar Tab
+        self.tab_bar.addTab(self.home, "Home")
+        self.tab_bar.addTab(settings, "Settings")
+        self.main_layout.addWidget(self.tab_bar, 0, QtCore.Qt.AlignmentFlag.AlignTop)
         self.setLayout(self.main_layout)
 
+    # SLOTS for the signals
     def start_button_on_click(self):
-        print("Pressed button")
+        print({self.username_format.text(): self.password_format.text()})
 
     def credential_button_checked(self):
         print("Checked" if self.remember_credentials_button.isChecked() else "Is unchecked")
