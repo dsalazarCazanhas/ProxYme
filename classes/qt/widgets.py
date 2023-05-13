@@ -1,6 +1,6 @@
 # ***Imports***
 # Local
-from .metas import icon
+from .meta import icon
 # Core
 
 # Third
@@ -22,13 +22,11 @@ class TabBar(QWidget):
 
         # Start Button
         self.start_button = QPushButton("&Start")
-        self.start_button.setStyleSheet('Color: Black')
         self.start_button.clicked.connect(self.start_button_on_click)
 
         # Home tab fields and configs
         # Username
         self.username_format = QLineEdit()
-        self.username_format.setStyleSheet('color: black')
         self.username_format.setPlaceholderText('username')
         # Password
         self.password_format = QLineEdit()
@@ -66,7 +64,10 @@ class TabBar(QWidget):
 
     # SLOTS for the signals
     def start_button_on_click(self):
-        print({self.username_format.text(): self.password_format.text()})
+        if not self.username_format.text() or not self.password_format.text():
+            print("Check again, you let a field empty!")
+        else:
+            print({self.username_format.text(): self.password_format.text()})
 
     def credential_button_checked(self):
         print("Checked" if self.remember_credentials_button.isChecked() else "Is unchecked")

@@ -1,7 +1,7 @@
 # ***Imports***
 # Local
 from .widgets import TabBar
-from .metas import icon
+from .meta import icon
 # Core
 
 # Third
