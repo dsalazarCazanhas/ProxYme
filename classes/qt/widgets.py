@@ -2,7 +2,7 @@
 # Local
 from .meta import icon
 # Core
-
+import subprocess as sp
 # Third
 from PySide6 import QtCore, QtGui
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QTabWidget, QFormLayout, QLineEdit, QPushButton, QCheckBox
@@ -65,9 +65,11 @@ class TabBar(QWidget):
     # SLOTS for the signals
     def start_button_on_click(self):
         if not self.username_format.text() or not self.password_format.text():
-            print("Check again, you let a field empty!")
+            print("Check again, you left a field empty!")
         else:
-            print({self.username_format.text(): self.password_format.text()})
+            user_input = {'username': self.username_format.text(),
+                          'password': self.password_format.text()}
+            sp.run(["echo", f"{user_input['username']}"])
 
     def credential_button_checked(self):
         print("Checked" if self.remember_credentials_button.isChecked() else "Is unchecked")
