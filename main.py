@@ -1,10 +1,8 @@
-# ***Imports***
-# Local
-from classes.qt.main_window import MainWindow
-# Core
 import sys
-# Third
+
 from PySide6.QtWidgets import QApplication
+
+from proxyme.qt.main_window import MainWindow
 
 
 def main():
