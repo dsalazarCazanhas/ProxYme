@@ -48,14 +48,20 @@ class TabBar(QWidget):
         home_layout.addWidget(start_button)
         home_layout.setFormAlignment(QtCore.Qt.AlignmentFlag.AlignJustify)
 
+        tab_bar.addTab(home, "Home")
+        tab_bar.addTab(self.build_settings_tab(), "Settings")
+        self.main_layout.addWidget(tab_bar, 0, QtCore.Qt.AlignmentFlag.AlignTop)
+        self.setLayout(self.main_layout)
+
+    def build_settings_tab(self):
+        # Settings Tab config
         settings = QWidget(self)
         settings_layout = QFormLayout()
         settings.setLayout(settings_layout)
-
-        tab_bar.addTab(home, "Home")
-        tab_bar.addTab(settings, "Settings")
-        self.main_layout.addWidget(tab_bar, 0, QtCore.Qt.AlignmentFlag.AlignTop)
-        self.setLayout(self.main_layout)
+        settings_layout.setFormAlignment(QtCore.Qt.AlignmentFlag.AlignJustify)
+        settings_layout.addRow('Proxy Host: ', QLineEdit())
+        settings_layout.addRow('Proxy Port: ', QLineEdit())
+        return settings
 
     def start_button_on_click(self):
         print("Pressed button")
