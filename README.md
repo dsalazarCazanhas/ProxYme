@@ -21,8 +21,6 @@ A lightweight SSH tunnel manager with a PySide6 GUI for Windows and Linux.
 ## Run
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate      # Windows
-pip install -r requirements.txt
-python main.py
+uv sync
+uv run python main.py
 ```
