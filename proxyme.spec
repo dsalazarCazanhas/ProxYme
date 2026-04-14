@@ -15,7 +15,6 @@ a = Analysis(
         # paramiko crypto backends
         "paramiko.transport",
         "paramiko.auth_handler",
-        "paramiko.dsskey",
         "paramiko.ecdsakey",
         "paramiko.ed25519key",
         "paramiko.rsakey",
