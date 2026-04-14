@@ -34,7 +34,7 @@ jobs:
         run: uv python install
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --frozen
 
       - name: Build binary
         run: uv run pyinstaller proxyme.spec
