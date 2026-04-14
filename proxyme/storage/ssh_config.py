@@ -1,0 +1,265 @@
+import getpass
+import logging
+import os
+from pathlib import Path
+from typing import Optional, TypeVar
+
+import paramiko
+
+from proxyme.tunnel.models import AuthMethod, TunnelConfig, TunnelMode
+from proxyme.storage import repository
+from proxyme.storage.repository import TunnelSupplement
+
+_T = TypeVar("_T")
+
+_log = logging.getLogger(__name__)
+
+_SSH_CONFIG_PATH = Path.home() / ".ssh" / "config"
+
+# Sentinel — marks a field as absent in the SSH config
+_MISSING = object()
+
+
+def _load_ssh_config() -> paramiko.SSHConfig:
+    config = paramiko.SSHConfig()
+    if _SSH_CONFIG_PATH.exists():
+        with _SSH_CONFIG_PATH.open("r", encoding="utf-8") as f:
+            config.parse(f)
+    return config
+
+
+def load_hosts() -> list[str]:
+    """Return all named Host aliases from ~/.ssh/config (excludes wildcard '*')."""
+    config = _load_ssh_config()
+    return [h for h in config.get_hostnames() if h != "*"]
+
+
+def resolve_tunnel(host_alias: str) -> TunnelConfig:
+    """
+    Build a TunnelConfig by merging ~/.ssh/config (primary) with
+    ~/.proxyme/tunnels.json (supplement for missing fields).
+
+    Raises ValueError if critical fields are still missing after merging.
+    """
+    ssh_data   = _load_ssh_config().lookup(host_alias)
+    supplement = repository.find_by_name(host_alias)  # may be None
+
+    # --- SSH connection fields (SSH config is primary) ---
+    ssh_host = _resolve_field("ssh_host",  ssh_data.get("hostname"), supplement)
+    ssh_port = _parse_port(ssh_data.get("port")) or 22
+    ssh_user = _resolve_field("ssh_user",  ssh_data.get("user", getpass.getuser()), supplement)
+
+    # --- Identity / auth method ---
+    identity_files = _as_list(ssh_data.get("identityfile"))
+    key_path = _resolve_field("key_path", _first(identity_files), supplement)
+    auth_method = _resolve_field(
+        "auth_method",
+        AuthMethod.PRIVATE_KEY if key_path else None,
+        supplement,
+    )
+
+    # --- Forwarding mode ---
+    local_forwards   = _as_list(ssh_data.get("localforward"))
+    dynamic_forwards = _as_list(ssh_data.get("dynamicforward"))
+
+    if local_forwards:
+        mode, local_port, remote_host, remote_port = _parse_local_forward(local_forwards[0])
+    elif dynamic_forwards:
+        mode        = TunnelMode.DYNAMIC
+        local_port  = int(dynamic_forwards[0].strip())
+        remote_host = None
+        remote_port = None
+    else:
+        # No forwarding in SSH config — require supplement
+        mode        = _resolve_field("mode",        None, supplement)
+        local_port  = _resolve_field("local_port",  None, supplement)
+        remote_host = _resolve_field("remote_host", None, supplement)
+        remote_port = _resolve_field("remote_port", None, supplement)
+
+    # --- Validate critical fields (rebind to narrow Optional away) ---
+    ssh_host    = _require(ssh_host,    "ssh_host",    host_alias)
+    ssh_port    = _require(ssh_port,    "ssh_port",    host_alias)
+    ssh_user    = _require(ssh_user,    "ssh_user",    host_alias)
+    auth_method = _require(auth_method, "auth_method", host_alias)
+    mode        = _require(mode,        "mode",        host_alias)
+    local_port  = _require(local_port,  "local_port",  host_alias)
+    if mode == TunnelMode.LOCAL:
+        _require(remote_host, "remote_host", host_alias)
+        _require(remote_port, "remote_port", host_alias)
+
+    return TunnelConfig(
+        name        = host_alias,
+        ssh_host    = ssh_host,
+        ssh_port    = ssh_port,
+        ssh_user    = ssh_user,
+        auth_method = auth_method,
+        mode        = mode,
+        local_port  = local_port,
+        remote_host = remote_host,
+        remote_port = remote_port,
+        key_path    = _expand_key_path(key_path),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_field(field: str, ssh_value, supplement: Optional[TunnelSupplement]):
+    """Return ssh_value if present, else the same field from supplement, else None."""
+    if ssh_value is not None:
+        return ssh_value
+    if supplement is not None:
+        return getattr(supplement, field, None)
+    return None
+
+
+def _parse_port(raw: Optional[str]) -> Optional[int]:
+    try:
+        return int(raw) if raw else None
+    except ValueError:
+        return None
+
+
+def _first(items: list) -> Optional[str]:
+    return items[0] if items else None
+
+
+def _parse_local_forward(raw: str):
+    """
+    Parse a LocalForward value.
+    Accepted formats:
+      "5432 db.internal:5432"
+      "127.0.0.1:5432 db.internal:5432"
+    """
+    parts = raw.strip().split()
+    if len(parts) != 2:
+        raise ValueError(f"Cannot parse LocalForward value: {raw!r}")
+
+    local_part, remote_part = parts
+
+    # local side — may be "port" or "bind_addr:port"
+    local_port = int(local_part.split(":")[-1])
+
+    # remote side — always "host:port"
+    remote_host, _, remote_port_str = remote_part.rpartition(":")
+    remote_port = int(remote_port_str)
+
+    return TunnelMode.LOCAL, local_port, remote_host, remote_port
+
+
+def _expand_key_path(path: Optional[str]) -> Optional[str]:
+    """Expand ~ and env vars in key paths, never log the result."""
+    if path is None:
+        return None
+    return str(Path(os.path.expandvars(path)).expanduser())
+
+
+def peek_tunnel_gaps(host_alias: str) -> set[str]:
+    """
+    Return the set of field names that are missing for a complete TunnelConfig,
+    after merging SSH config and JSON supplement. Never raises.
+    Fields: 'mode', 'local_port', 'remote_host', 'remote_port'
+    """
+    ssh_data   = _load_ssh_config().lookup(host_alias)
+    supplement = repository.find_by_name(host_alias)
+
+    local_forwards   = _as_list(ssh_data.get("localforward"))
+    dynamic_forwards = _as_list(ssh_data.get("dynamicforward"))
+
+    gaps: set[str] = set()
+
+    if local_forwards or dynamic_forwards:
+        return gaps  # forwarding fully defined in SSH config
+
+    # Check supplement
+    mode        = getattr(supplement, "mode",        None) if supplement else None
+    local_port  = getattr(supplement, "local_port",  None) if supplement else None
+    remote_host = getattr(supplement, "remote_host", None) if supplement else None
+    remote_port = getattr(supplement, "remote_port", None) if supplement else None
+
+    if mode is None:
+        gaps.add("mode")
+    if local_port is None:
+        gaps.add("local_port")
+    if mode == TunnelMode.LOCAL or mode is None:
+        if remote_host is None:
+            gaps.add("remote_host")
+        if remote_port is None:
+            gaps.add("remote_port")
+
+    return gaps
+
+
+def peek_auth_method(host_alias: str) -> AuthMethod:
+    """Return the auth method detectable from SSH config alone."""
+    ssh_data = _load_ssh_config().lookup(host_alias)
+    identity_files = _as_list(ssh_data.get("identityfile"))
+    return AuthMethod.PRIVATE_KEY if identity_files else AuthMethod.PASSWORD
+
+
+def get_key_filename(host_alias: str) -> Optional[str]:
+    """Return the filename (not full path) of the first IdentityFile, or None."""
+    ssh_data = _load_ssh_config().lookup(host_alias)
+    identity_files = _as_list(ssh_data.get("identityfile"))
+    return Path(identity_files[0]).name if identity_files else None
+
+
+def get_key_path(host_alias: str) -> Optional[str]:
+    """Return the full expanded path of the first IdentityFile, or None."""
+    ssh_data = _load_ssh_config().lookup(host_alias)
+    identity_files = _as_list(ssh_data.get("identityfile"))
+    return _expand_key_path(_first(identity_files))
+
+
+def _as_list(val: object) -> list[str]:
+    """Normalise a paramiko SSHConfig value to list[str]."""
+    if isinstance(val, list):
+        return [str(v) for v in val]
+    if isinstance(val, str):
+        return [val]
+    return []
+
+
+def _require(value: Optional[_T], field: str, alias: str) -> _T:
+    if value is None:
+        _log.warning("Missing field '%s' for host '%s'", field, alias)
+        raise ValueError(
+            f"Missing required field '{field}' for host '{alias}'. "
+            f"Define it in ~/.ssh/config or add a supplement entry in ~/.proxyme/tunnels.json."
+        )
+    return value
+
+
+def resolve_tunnel_partial(host_alias: str) -> dict:
+    """
+    Like resolve_tunnel() but never raises.
+    Returns a dict with keys: mode, local_port, remote_host, remote_port.
+    Values are None when not resolved.
+    """
+    ssh_data   = _load_ssh_config().lookup(host_alias)
+    supplement = repository.find_by_name(host_alias)
+
+    local_forwards   = _as_list(ssh_data.get("localforward"))
+    dynamic_forwards = _as_list(ssh_data.get("dynamicforward"))
+
+    if local_forwards:
+        _, local_port, remote_host, remote_port = _parse_local_forward(local_forwards[0])
+        mode = TunnelMode.LOCAL
+    elif dynamic_forwards:
+        mode        = TunnelMode.DYNAMIC
+        local_port  = int(dynamic_forwards[0].strip())
+        remote_host = None
+        remote_port = None
+    else:
+        mode        = getattr(supplement, "mode",        None) if supplement else None
+        local_port  = getattr(supplement, "local_port",  None) if supplement else None
+        remote_host = getattr(supplement, "remote_host", None) if supplement else None
+        remote_port = getattr(supplement, "remote_port", None) if supplement else None
+
+    return {
+        "mode":        mode,
+        "local_port":  local_port,
+        "remote_host": remote_host,
+        "remote_port": remote_port,
+    }
