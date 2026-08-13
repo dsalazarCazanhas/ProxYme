@@ -2,6 +2,7 @@ import pytest
 
 from proxyme.storage.repository import TunnelSupplement, upsert
 from proxyme.storage.ssh_config import (
+    format_host_block,
     get_key_filename,
     get_key_path,
     load_hosts,
@@ -10,7 +11,7 @@ from proxyme.storage.ssh_config import (
     resolve_tunnel,
     resolve_tunnel_partial,
 )
-from proxyme.tunnel.models import AuthMethod, TunnelMode
+from proxyme.tunnel.models import AuthMethod, TunnelConfig, TunnelMode
 
 
 def _write_config(path, text):
@@ -191,4 +192,53 @@ Host db
         "mode": None, "local_port": None, "remote_host": None, "remote_port": None,
     }
 
+
+def _make_config(**overrides) -> TunnelConfig:
+    defaults = {
+        "name": "myserver", "ssh_host": "db.internal", "ssh_port": 22, "ssh_user": "alice",
+        "auth_method": AuthMethod.PASSWORD, "mode": TunnelMode.LOCAL, "local_port": 5432,
+        "remote_host": "db.internal", "remote_port": 5432, "key_path": None,
+    }
+    defaults.update(overrides)
+    return TunnelConfig(**defaults)
+
+
+def test_format_host_block_local_mode_password_auth():
+    block = format_host_block(_make_config())
+    assert block == (
+        "Host myserver\n"
+        "    HostName db.internal\n"
+        "    User alice\n"
+        "    LocalForward 5432 db.internal:5432"
+    )
+
+
+def test_format_host_block_omits_port_when_default():
+    block = format_host_block(_make_config(ssh_port=22))
+    assert "Port" not in block
+
+
+def test_format_host_block_includes_port_when_non_default():
+    block = format_host_block(_make_config(ssh_port=2222))
+    assert "    Port 2222" in block
+
+
+def test_format_host_block_dynamic_mode_uses_dynamicforward():
+    block = format_host_block(_make_config(
+        mode=TunnelMode.DYNAMIC, local_port=1080, remote_host=None, remote_port=None,
+    ))
+    assert "DynamicForward 1080" in block
+    assert "LocalForward" not in block
+
+
+def test_format_host_block_includes_identity_file_for_private_key_auth():
+    block = format_host_block(_make_config(
+        auth_method=AuthMethod.PRIVATE_KEY, key_path="/home/alice/.ssh/id_ed25519",
+    ))
+    assert "    IdentityFile /home/alice/.ssh/id_ed25519" in block
+
+
+def test_format_host_block_never_mentions_password():
+    block = format_host_block(_make_config(auth_method=AuthMethod.PASSWORD))
+    assert "password" not in block.lower()
 

@@ -188,6 +188,29 @@ def peek_tunnel_gaps(host_alias: str) -> set[str]:
     return gaps
 
 
+def format_host_block(config: TunnelConfig) -> str:
+    """Render a TunnelConfig as a ~/.ssh/config `Host` block, for the user to copy
+    and paste by hand. ProxYme never writes to ~/.ssh/config itself.
+
+    Password auth has no SSH config equivalent, so nothing credential-related is
+    ever included here — only topology (host, port, identity file path, forwarding).
+    """
+    lines = [f"Host {config.name}"]
+    lines.append(f"    HostName {config.ssh_host}")
+    lines.append(f"    User {config.ssh_user}")
+    if config.ssh_port != 22:
+        lines.append(f"    Port {config.ssh_port}")
+    if config.auth_method == AuthMethod.PRIVATE_KEY and config.key_path:
+        lines.append(f"    IdentityFile {config.key_path}")
+    if config.mode == TunnelMode.LOCAL:
+        lines.append(
+            f"    LocalForward {config.local_port} {config.remote_host}:{config.remote_port}"
+        )
+    elif config.mode == TunnelMode.DYNAMIC:
+        lines.append(f"    DynamicForward {config.local_port}")
+    return "\n".join(lines)
+
+
 def peek_auth_method(host_alias: str) -> AuthMethod:
     """Return the auth method detectable from SSH config alone."""
     ssh_data = _load_ssh_config().lookup(host_alias)
