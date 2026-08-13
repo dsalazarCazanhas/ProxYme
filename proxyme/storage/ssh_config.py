@@ -2,13 +2,13 @@ import getpass
 import logging
 import os
 from pathlib import Path
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 import paramiko
 
-from proxyme.tunnel.models import AuthMethod, TunnelConfig, TunnelMode
 from proxyme.storage import repository
 from proxyme.storage.repository import TunnelSupplement
+from proxyme.tunnel.models import AuthMethod, TunnelConfig, TunnelMode
 
 _T = TypeVar("_T")
 
@@ -52,11 +52,8 @@ def resolve_tunnel(host_alias: str) -> TunnelConfig:
     # --- Identity / auth method ---
     identity_files = _as_list(ssh_data.get("identityfile"))
     key_path = _resolve_field("key_path", _first(identity_files), supplement)
-    auth_method = _resolve_field(
-        "auth_method",
-        AuthMethod.PRIVATE_KEY if key_path else None,
-        supplement,
-    )
+    # Never persisted in the supplement (credentials aren't stored) — always derived.
+    auth_method = AuthMethod.PRIVATE_KEY if key_path else AuthMethod.PASSWORD
 
     # --- Forwarding mode ---
     local_forwards   = _as_list(ssh_data.get("localforward"))
@@ -105,7 +102,7 @@ def resolve_tunnel(host_alias: str) -> TunnelConfig:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_field(field: str, ssh_value, supplement: Optional[TunnelSupplement]):
+def _resolve_field(field: str, ssh_value, supplement: TunnelSupplement | None):
     """Return ssh_value if present, else the same field from supplement, else None."""
     if ssh_value is not None:
         return ssh_value
@@ -114,14 +111,14 @@ def _resolve_field(field: str, ssh_value, supplement: Optional[TunnelSupplement]
     return None
 
 
-def _parse_port(raw: Optional[str]) -> Optional[int]:
+def _parse_port(raw: str | None) -> int | None:
     try:
         return int(raw) if raw else None
     except ValueError:
         return None
 
 
-def _first(items: list) -> Optional[str]:
+def _first(items: list) -> str | None:
     return items[0] if items else None
 
 
@@ -148,7 +145,7 @@ def _parse_local_forward(raw: str):
     return TunnelMode.LOCAL, local_port, remote_host, remote_port
 
 
-def _expand_key_path(path: Optional[str]) -> Optional[str]:
+def _expand_key_path(path: str | None) -> str | None:
     """Expand ~ and env vars in key paths, never log the result."""
     if path is None:
         return None
@@ -198,14 +195,14 @@ def peek_auth_method(host_alias: str) -> AuthMethod:
     return AuthMethod.PRIVATE_KEY if identity_files else AuthMethod.PASSWORD
 
 
-def get_key_filename(host_alias: str) -> Optional[str]:
+def get_key_filename(host_alias: str) -> str | None:
     """Return the filename (not full path) of the first IdentityFile, or None."""
     ssh_data = _load_ssh_config().lookup(host_alias)
     identity_files = _as_list(ssh_data.get("identityfile"))
     return Path(identity_files[0]).name if identity_files else None
 
 
-def get_key_path(host_alias: str) -> Optional[str]:
+def get_key_path(host_alias: str) -> str | None:
     """Return the full expanded path of the first IdentityFile, or None."""
     ssh_data = _load_ssh_config().lookup(host_alias)
     identity_files = _as_list(ssh_data.get("identityfile"))
@@ -221,7 +218,7 @@ def _as_list(val: object) -> list[str]:
     return []
 
 
-def _require(value: Optional[_T], field: str, alias: str) -> _T:
+def _require(value: _T | None, field: str, alias: str) -> _T:
     if value is None:
         _log.warning("Missing field '%s' for host '%s'", field, alias)
         raise ValueError(

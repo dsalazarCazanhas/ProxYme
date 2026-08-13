@@ -18,6 +18,8 @@ dependencies = [
 dev = [
     "pyinstaller>=6.0",
     "ruff>=0.9",
+    "pytest>=8.0",
+    "pytest-mock>=3.14",
 ]
 
 [build-system]
@@ -30,3 +32,6 @@ packages = ["proxyme"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.pytest.ini_options]
+addopts = "-ra"
