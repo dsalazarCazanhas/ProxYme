@@ -7,15 +7,16 @@ import socketserver
 import struct
 import threading
 from pathlib import Path
-from typing import Optional
 
 import paramiko
 from PySide6.QtCore import QObject, QThread, Signal
 
-from .models import TunnelConfig, TunnelMode
 from .auth.base import AuthStrategy
+from .models import TunnelConfig, TunnelMode
 
 _log = logging.getLogger(__name__)
+
+_CONNECTION_TIMEOUT_S = 13  # bounds both the TCP connect and the SSH handshake
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +49,8 @@ class _Socks5Handler(socketserver.BaseRequestHandler):
         # --- Request ---
         req = self._recv_exact(4)
         if not req or req[0] != self._SOCKS_VERSION or req[1] != 1:  # CMD=CONNECT only
-            sock.sendall(bytes([self._SOCKS_VERSION, 7, 0, 1, 0, 0, 0, 0, 0, 0]))  # command not supported
+            # command not supported
+            sock.sendall(bytes([self._SOCKS_VERSION, 7, 0, 1, 0, 0, 0, 0, 0, 0]))
             return
 
         atyp = req[3]
@@ -62,7 +64,8 @@ class _Socks5Handler(socketserver.BaseRequestHandler):
             raw = self._recv_exact(16)
             host = socket.inet_ntop(socket.AF_INET6, raw)
         else:
-            sock.sendall(bytes([self._SOCKS_VERSION, 8, 0, 1, 0, 0, 0, 0, 0, 0]))  # address type not supported
+            # address type not supported
+            sock.sendall(bytes([self._SOCKS_VERSION, 8, 0, 1, 0, 0, 0, 0, 0, 0]))
             return
 
         port_raw = self._recv_exact(2)
@@ -77,7 +80,8 @@ class _Socks5Handler(socketserver.BaseRequestHandler):
             )
         except Exception as exc:
             _log.debug("SOCKS5: could not open channel to %s:%s — %s", host, port, exc)
-            sock.sendall(bytes([self._SOCKS_VERSION, 5, 0, 1, 0, 0, 0, 0, 0, 0]))  # connection refused
+            # connection refused
+            sock.sendall(bytes([self._SOCKS_VERSION, 5, 0, 1, 0, 0, 0, 0, 0, 0]))
             return
 
         # Success reply — bind address 0.0.0.0:0
@@ -198,26 +202,40 @@ class TunnelWorker(QObject):
         super().__init__()
         self._config    = config
         self._auth      = auth
-        self._transport: Optional[paramiko.Transport] = None
-        self._server:    Optional[socketserver.BaseServer] = None
-        self._host_key_event:    Optional[threading.Event] = None
+        self._sock:      socket.socket | None = None
+        self._transport: paramiko.Transport | None = None
+        self._server:    socketserver.BaseServer | None = None
+        self._host_key_event:    threading.Event | None = None
         self._host_key_accepted: bool                      = False
+        self._cancelled: bool = False
 
     def run(self) -> None:
         _log.info("Connecting to %s:%s (mode=%s)",
                   self._config.ssh_host, self._config.ssh_port, self._config.mode.value)
         try:
-            self._transport = paramiko.Transport((self._config.ssh_host, self._config.ssh_port))
-            self._transport.start_client()
+            sock = socket.create_connection(
+                (self._config.ssh_host, self._config.ssh_port), timeout=_CONNECTION_TIMEOUT_S,
+            )
+            self._sock = sock
+            if self._cancelled:
+                raise OSError("Connection cancelled.")
+            self._transport = paramiko.Transport(sock)
+            self._transport.start_client(timeout=_CONNECTION_TIMEOUT_S)
             ok, reason = self._verify_host_key()
             if not ok:
                 _log.warning("Host key verification failed: %s", reason)
                 self.failed.emit(reason)
+                self._close_connecting()
                 return
             self._auth.apply(self._transport)
         except Exception as exc:
-            _log.warning("Connection failed: %s", exc)
-            self.failed.emit(str(exc))
+            if self._cancelled:
+                _log.info("Connection attempt cancelled by user")
+                self.failed.emit("Connection cancelled.")
+            else:
+                _log.warning("Connection failed: %s", exc)
+                self.failed.emit(str(exc))
+            self._close_connecting()
             return
 
         _log.info("Tunnel established — local port %s", self._config.local_port)
@@ -236,6 +254,19 @@ class TunnelWorker(QObject):
                 self._transport.close()
             _log.info("Tunnel stopped")
             self.stopped.emit()
+
+    def _close_connecting(self) -> None:
+        """Best-effort cleanup of a socket/transport that never reached the serving phase."""
+        if self._transport is not None:
+            try:
+                self._transport.close()
+            except Exception as exc:
+                _log.debug("Error closing transport after failed connect: %s", exc)
+        elif self._sock is not None:
+            try:
+                self._sock.close()
+            except OSError as exc:
+                _log.debug("Error closing socket after failed connect: %s", exc)
 
     def _run_local(self) -> None:
         assert self._transport is not None
@@ -271,8 +302,8 @@ class TunnelWorker(QObject):
         if known_hosts_path.exists():
             try:
                 hk.load(str(known_hosts_path))
-            except Exception:
-                pass  # corrupted known_hosts — treat as empty
+            except Exception as exc:
+                _log.debug("Corrupted known_hosts — treating as empty: %s", exc)
 
         existing = hk.lookup(hostname)
         if existing is not None:
@@ -313,12 +344,20 @@ class TunnelWorker(QObject):
 
     def stop(self) -> None:
         """Signal the worker to stop cleanly. Thread-safe."""
+        self._cancelled = True
         # Unblock any pending host key dialog before shutting down
         if self._host_key_event is not None and not self._host_key_event.is_set():
             self._host_key_accepted = False
             self._host_key_event.set()
         if self._server is not None:
             self._server.shutdown()
+        elif self._sock is not None:
+            # Still connecting/negotiating — force-close the socket to unblock
+            # the blocking connect()/start_client() call in the worker thread.
+            try:
+                self._sock.close()
+            except OSError as exc:
+                _log.debug("Error force-closing in-progress connection socket: %s", exc)
         # Transport is closed inside run()'s finally block — no race condition.
 
 
@@ -335,8 +374,8 @@ class TunnelManager(QObject):
 
     def __init__(self) -> None:
         super().__init__()
-        self._worker: Optional[TunnelWorker] = None
-        self._thread: Optional[QThread]      = None
+        self._worker: TunnelWorker | None = None
+        self._thread: QThread | None      = None
 
     def start(self, config: TunnelConfig, auth: AuthStrategy) -> None:
         if self._thread and self._thread.isRunning():
@@ -358,8 +397,12 @@ class TunnelManager(QObject):
         self._worker.host_key_unknown.connect(self.host_key_unknown)
         self._worker.host_key_mismatch.connect(self.host_key_mismatch)
 
-        # let the worker's stop signal drive thread shutdown
+        # let the worker's stop/failure signals drive thread shutdown — `failed` fires
+        # alone when the connection never gets past connecting (auth error, timeout,
+        # cancel, rejected host key); `stopped` fires once the serving loop exits.
+        # Without both, the thread never quits and start() silently no-ops forever.
         self._worker.stopped.connect(self._thread.quit)
+        self._worker.failed.connect(self._thread.quit)
 
         self._thread.start()
 
@@ -373,6 +416,20 @@ class TunnelManager(QObject):
 
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.isRunning()
+
+    def wait_stopped(self, timeout_ms: int) -> bool:
+        """Block until the worker thread finishes, forcing termination past the timeout.
+
+        Returns True if the thread stopped cleanly within the timeout.
+        """
+        if self._thread is None:
+            return True
+        if self._thread.wait(timeout_ms):
+            return True
+        _log.warning("Tunnel thread did not finish in time — forcing termination")
+        self._thread.terminate()
+        self._thread.wait()
+        return False
 
     def _cleanup(self) -> None:
         if self._worker:
