@@ -1,10 +1,11 @@
 import logging
+from importlib.metadata import version
 
-from PySide6 import QtGui, QtCore
+from PySide6 import QtCore, QtGui
 from PySide6.QtWidgets import QMainWindow, QMessageBox
 
-from .widgets import TabBar
 from .metas import icon
+from .widgets import TabBar
 
 _log = logging.getLogger(__name__)
 
@@ -24,7 +25,8 @@ class MainWindow(QMainWindow):
         quit_action = file_menu.addAction("Quit")
         quit_action.triggered.connect(self.close)
         about_menu = menu_bar.addMenu("&Help")
-        about_menu.addAction("About")
+        about_action = about_menu.addAction("About")
+        about_action.triggered.connect(self._show_about)
 
         self._tab_bar = TabBar()
         self.setCentralWidget(self._tab_bar)
@@ -34,9 +36,9 @@ class MainWindow(QMainWindow):
             f"Ready  —  {QtCore.QDateTime.currentDateTime().toString()}"
         )
 
-    def closeEvent(self, event) -> None:  # noqa: N802
+    def closeEvent(self, event) -> None:
         """Confirm with the user before closing if a tunnel is active."""
-        manager = self._tab_bar.tunnel_tab._manager
+        manager = self._tab_bar.tunnel_tab.manager
         if manager.is_running():
             reply = QMessageBox(self)
             reply.setWindowTitle("ProxYme")
@@ -53,13 +55,21 @@ class MainWindow(QMainWindow):
 
             _log.info("User confirmed close — stopping active tunnel")
             manager.stop()
-            thread = manager._thread
-            if thread is not None and not thread.wait(_THREAD_STOP_TIMEOUT_MS):
-                _log.warning("Tunnel thread did not finish in time — forcing termination")
-                thread.terminate()
-                thread.wait()
+            manager.wait_stopped(_THREAD_STOP_TIMEOUT_MS)
 
         event.accept()
 
     def quit_app(self):
         self.close()
+
+    def _show_about(self) -> None:
+        QMessageBox.about(
+            self,
+            "About ProxYme",
+            "<h3>ProxYme</h3>"
+            f"<p>Version {version('proxyme')}</p>"
+            "<p>A lightweight SSH tunnel manager.</p>"
+            "<p>License: MIT</p>"
+            '<p><a href="https://github.com/dsalazarCazanhas/ProxYme">'
+            "github.com/dsalazarCazanhas/ProxYme</a></p>",
+        )

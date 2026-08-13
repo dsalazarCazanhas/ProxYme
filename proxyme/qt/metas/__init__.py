@@ -1,10 +1,9 @@
-import os
+from pathlib import Path
 
-metas_dir = os.path.dirname(os.path.realpath(__file__))
-icon_window = metas_dir + os.path.sep + 'window_icon.png'
-icon_eye_closed = metas_dir + os.path.sep + 'close_eye.png'
-icon_eye_opened = metas_dir + os.path.sep + 'open_eye.png'
+_metas_dir = Path(__file__).resolve().parent
 
-icon = {'window_icon': icon_window,
-        'icon_eye_closed': icon_eye_closed,
-        'icon_eye_opened': icon_eye_opened}
+icon = {
+    'window_icon':     str(_metas_dir / 'window_icon.png'),
+    'icon_eye_closed':  str(_metas_dir / 'close_eye.png'),
+    'icon_eye_opened':  str(_metas_dir / 'open_eye.png'),
+}

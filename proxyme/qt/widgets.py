@@ -1,39 +1,49 @@
 import logging
 import os
-import sys
+import shlex
 import subprocess
+import sys
 from pathlib import Path
-from typing import Optional
+from typing import ClassVar
 
 import paramiko
 from PySide6 import QtCore, QtGui
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QTabWidget,
-    QLineEdit, QPushButton, QLabel, QComboBox, QMessageBox,
-    QButtonGroup, QRadioButton, QFileDialog,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
-from proxyme.tunnel.manager import TunnelManager
+from proxyme.qt.dialogs import ManualTunnelDialog, PassphraseDialog
+from proxyme.qt.forms import AuthMethodFields, TunnelFieldsForm, parse_port
+from proxyme.storage import repository, ssh_config
+from proxyme.storage.repository import TunnelSupplement
+from proxyme.storage.ssh_config import (
+    get_key_path,
+    peek_auth_method,
+    peek_tunnel_gaps,
+    resolve_tunnel,
+    resolve_tunnel_partial,
+)
 from proxyme.tunnel.auth.base import AuthStrategy
 from proxyme.tunnel.auth.password import PasswordAuth
 from proxyme.tunnel.auth.private_key import PrivateKeyAuth, load_private_key
-
+from proxyme.tunnel.manager import TunnelManager
 from proxyme.tunnel.models import AuthMethod, TunnelConfig, TunnelMode
-from proxyme.storage import ssh_config
-from proxyme.storage.ssh_config import (
-    resolve_tunnel, peek_auth_method, peek_tunnel_gaps, resolve_tunnel_partial,
-    get_key_path,
-)
-from proxyme.storage import repository
-from proxyme.storage.repository import TunnelSupplement
-from proxyme.qt.dialogs import PassphraseDialog, ManualTunnelDialog
+
 from .metas import icon
 
 _log = logging.getLogger(__name__)
 
 
 class _StatusIndicator(QLabel):
-    _COLORS = {
+    _COLORS: ClassVar[dict[str, str]] = {
         "ready":      "#888888",
         "connecting": "#E6A817",
         "connected":  "#27AE60",
@@ -82,6 +92,9 @@ class TunnelTab(QWidget):
         add_manual_btn = QPushButton("+ Manual")
         add_manual_btn.setFlat(True)
         add_manual_btn.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.PointingHandCursor))
+        add_manual_btn.setToolTip(
+            "Manual entries live in memory only — they're not saved when you close the app."
+        )
         add_manual_btn.clicked.connect(self._on_add_manual)
         host_row.addWidget(host_label)
         host_row.addWidget(self.host_combo, stretch=1)
@@ -93,21 +106,10 @@ class TunnelTab(QWidget):
         auth_section = QVBoxLayout()
         auth_section.setSpacing(4)
 
-        # Row 1: label + radio buttons
-        auth_top_row = QHBoxLayout()
-        auth_top_row.addWidget(QLabel("Auth:"))
-        self._auth_group = QButtonGroup(self)
-        self._radio_password = QRadioButton("Password")
-        self._radio_key      = QRadioButton("Private key")
-        self._radio_password.setChecked(True)
-        self._auth_group.addButton(self._radio_password)
-        self._auth_group.addButton(self._radio_key)
-        auth_top_row.addWidget(self._radio_password)
-        auth_top_row.addWidget(self._radio_key)
-        auth_top_row.addStretch()
-        auth_section.addLayout(auth_top_row)
+        self._auth = AuthMethodFields()
+        auth_section.addWidget(self._auth)
 
-        # Row 2a: password field (shown when Password selected)
+        # Password field (shown when Password selected)
         self._password_row = QWidget()
         pw_layout = QHBoxLayout(self._password_row)
         pw_layout.setContentsMargins(0, 0, 0, 0)
@@ -124,72 +126,18 @@ class TunnelTab(QWidget):
         pw_layout.addWidget(self._password_field)
         auth_section.addWidget(self._password_row)
 
-        # Row 2b: key path + Browse (shown when Private key selected)
-        self._key_row = QWidget()
-        key_layout = QHBoxLayout(self._key_row)
-        key_layout.setContentsMargins(0, 0, 0, 0)
-        self._key_path_field = QLineEdit()
-        self._key_path_field.setPlaceholderText("path to private key")
-        self._key_browse_btn = QPushButton("Browse…")
-        self._key_browse_btn.clicked.connect(self._browse_key)
-        key_layout.addWidget(self._key_path_field, stretch=1)
-        key_layout.addWidget(self._key_browse_btn)
-        self._key_row.setVisible(False)
-        auth_section.addWidget(self._key_row)
-
-        self._radio_password.toggled.connect(self._on_auth_radio_changed)
+        self._auth.password_selected.connect(self._on_auth_radio_changed)
         root.addLayout(auth_section)
 
         # --- Tunnel fields (shown only when missing from SSH config + JSON) ---
-        self._tunnel_fields_widget = QWidget()
-        tunnel_layout = QVBoxLayout(self._tunnel_fields_widget)
-        tunnel_layout.setContentsMargins(0, 0, 0, 0)
-        tunnel_layout.setSpacing(6)
+        self._fields = TunnelFieldsForm()
+        self._fields.setVisible(False)
+        root.addWidget(self._fields)
 
-        # Mode selector
-        self._mode_row = QHBoxLayout()
-        self._mode_row_widget = QWidget()
-        self._mode_row_widget.setLayout(self._mode_row)
-        self._mode_combo = QComboBox()
-        self._mode_combo.addItem("LOCAL  (-L)",  TunnelMode.LOCAL)
-        self._mode_combo.addItem("DYNAMIC (-D)", TunnelMode.DYNAMIC)
-        self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
-        self._mode_row.addWidget(QLabel("Mode:"))
-        self._mode_row.addWidget(self._mode_combo, stretch=1)
-        tunnel_layout.addWidget(self._mode_row_widget)
-
-        # Local port
-        self._local_port_row = QWidget()
-        lp_layout = QHBoxLayout(self._local_port_row)
-        lp_layout.setContentsMargins(0, 0, 0, 0)
-        self._local_port_field = QLineEdit()
-        self._local_port_field.setPlaceholderText("local port")
-        lp_layout.addWidget(QLabel("Local port:"))
-        lp_layout.addWidget(self._local_port_field, stretch=1)
-        tunnel_layout.addWidget(self._local_port_row)
-
-        # Remote host
-        self._remote_host_row = QWidget()
-        rh_layout = QHBoxLayout(self._remote_host_row)
-        rh_layout.setContentsMargins(0, 0, 0, 0)
-        self._remote_host_field = QLineEdit()
-        self._remote_host_field.setPlaceholderText("remote host")
-        rh_layout.addWidget(QLabel("Remote host:"))
-        rh_layout.addWidget(self._remote_host_field, stretch=1)
-        tunnel_layout.addWidget(self._remote_host_row)
-
-        # Remote port
-        self._remote_port_row = QWidget()
-        rp_layout = QHBoxLayout(self._remote_port_row)
-        rp_layout.setContentsMargins(0, 0, 0, 0)
-        self._remote_port_field = QLineEdit()
-        self._remote_port_field.setPlaceholderText("remote port")
-        rp_layout.addWidget(QLabel("Remote port:"))
-        rp_layout.addWidget(self._remote_port_field, stretch=1)
-        tunnel_layout.addWidget(self._remote_port_row)
-
-        self._tunnel_fields_widget.setVisible(False)
-        root.addWidget(self._tunnel_fields_widget)
+        self._fields_error_label = QLabel()
+        self._fields_error_label.setStyleSheet("color: #C0392B;")
+        self._fields_error_label.setVisible(False)
+        root.addWidget(self._fields_error_label)
 
         # --- Read-only config display (shown when all tunnel fields are resolved) ---
         self._config_display_widget = QWidget()
@@ -257,6 +205,10 @@ class TunnelTab(QWidget):
         root.addStretch()
         self._reload_hosts()
 
+    @property
+    def manager(self) -> TunnelManager:
+        return self._manager
+
     # ------------------------------------------------------------------
     # Host management
     # ------------------------------------------------------------------
@@ -286,20 +238,20 @@ class TunnelTab(QWidget):
 
         self._in_edit_override = False
         self._edit_actions_widget.setVisible(False)
+        self._clear_fields_error()
 
         # --- Manual host (in-memory, fully resolved) ---
         if alias in self._manual_configs:
             config = self._manual_configs[alias]
             if config.auth_method == AuthMethod.PRIVATE_KEY:
-                self._radio_key.setChecked(True)
-                self._key_path_field.setText(config.key_path or "")
+                self._auth.set_private_key(config.key_path)
                 self._password_row.setVisible(False)
-                self._key_row.setVisible(True)
+                self._auth.key_row.setVisible(True)
             else:
-                self._radio_password.setChecked(True)
+                self._auth.radio_password.setChecked(True)
                 self._password_row.setVisible(True)
-                self._key_row.setVisible(False)
-            self._tunnel_fields_widget.setVisible(False)
+                self._auth.key_row.setVisible(False)
+            self._fields.setVisible(False)
             self._update_config_display({
                 "mode":        config.mode,
                 "local_port":  config.local_port,
@@ -312,34 +264,33 @@ class TunnelTab(QWidget):
         # --- SSH config host ---
         method = peek_auth_method(alias)
         if method == AuthMethod.PRIVATE_KEY:
-            self._radio_key.setChecked(True)
-            self._key_path_field.setText(get_key_path(alias) or "")
+            self._auth.set_private_key(get_key_path(alias))
             self._password_row.setVisible(False)
-            self._key_row.setVisible(True)
+            self._auth.key_row.setVisible(True)
         else:
-            self._radio_password.setChecked(True)
+            self._auth.radio_password.setChecked(True)
             self._password_row.setVisible(True)
-            self._key_row.setVisible(False)
+            self._auth.key_row.setVisible(False)
 
         gaps = peek_tunnel_gaps(alias)
         if gaps:
             self._config_display_widget.setVisible(False)
-            self._mode_row_widget.setVisible("mode" in gaps)
-            self._local_port_row.setVisible("local_port" in gaps)
-            self._remote_host_row.setVisible("remote_host" in gaps)
-            self._remote_port_row.setVisible("remote_port" in gaps)
-            self._tunnel_fields_widget.setVisible(True)
+            self._fields.mode_row.setVisible("mode" in gaps)
+            self._fields.local_port_row.setVisible("local_port" in gaps)
+            self._fields.remote_host_row.setVisible("remote_host" in gaps)
+            self._fields.remote_port_row.setVisible("remote_port" in gaps)
+            self._fields.setVisible(True)
 
             supplement = repository.find_by_name(alias)
             if supplement:
                 if "local_port" in gaps and supplement.local_port:
-                    self._local_port_field.setText(str(supplement.local_port))
+                    self._fields.local_port_field.setText(str(supplement.local_port))
                 if "remote_host" in gaps and supplement.remote_host:
-                    self._remote_host_field.setText(supplement.remote_host)
+                    self._fields.remote_host_field.setText(supplement.remote_host)
                 if "remote_port" in gaps and supplement.remote_port:
-                    self._remote_port_field.setText(str(supplement.remote_port))
+                    self._fields.remote_port_field.setText(str(supplement.remote_port))
         else:
-            self._tunnel_fields_widget.setVisible(False)
+            self._fields.setVisible(False)
             partial = resolve_tunnel_partial(alias)
             self._update_config_display(partial)
             self._config_display_widget.setVisible(True)
@@ -355,12 +306,22 @@ class TunnelTab(QWidget):
         self._cd_rhost_label.setText(f"Remote host: {partial.get('remote_host') or '—'}")
         self._cd_rport_label.setText(f"Remote port: {partial.get('remote_port') or '—'}")
 
+    def _show_fields_error(self, message: str) -> None:
+        self._fields_error_label.setText(message)
+        self._fields_error_label.setVisible(True)
+
+    def _clear_fields_error(self) -> None:
+        self._fields_error_label.setVisible(False)
+
     def _on_edit_clicked(self) -> None:
         alias = self.host_combo.currentText()
 
         # Manual host — reopen dialog pre-filled
         if alias in self._manual_configs:
-            dialog = ManualTunnelDialog(self, existing=self._manual_configs[alias])
+            taken_names = self._taken_manual_names() - {alias}
+            dialog = ManualTunnelDialog(
+                self, existing=self._manual_configs[alias], taken_names=taken_names,
+            )
             if dialog.exec() == ManualTunnelDialog.DialogCode.Accepted:
                 config = dialog.tunnel_config()
                 self._manual_configs[config.name] = config
@@ -374,28 +335,22 @@ class TunnelTab(QWidget):
 
         # Show all tunnel fields pre-filled with current values
         mode = partial.get("mode")
-        if mode is not None:
-            idx = self._mode_combo.findData(mode)
-            if idx >= 0:
-                self._mode_combo.setCurrentIndex(idx)
-        lp = partial.get("local_port")
-        self._local_port_field.setText(str(lp) if lp is not None else "")
-        rh = partial.get("remote_host")
-        self._remote_host_field.setText(rh or "")
-        rp = partial.get("remote_port")
-        self._remote_port_field.setText(str(rp) if rp is not None else "")
+        self._fields.set_values(
+            mode, partial.get("local_port"), partial.get("remote_host"), partial.get("remote_port"),
+        )
 
-        self._mode_row_widget.setVisible(True)
-        self._local_port_row.setVisible(True)
+        self._fields.mode_row.setVisible(True)
+        self._fields.local_port_row.setVisible(True)
         is_local = (mode == TunnelMode.LOCAL) if mode else True
-        self._remote_host_row.setVisible(is_local)
-        self._remote_port_row.setVisible(is_local)
-        self._tunnel_fields_widget.setVisible(True)
+        self._fields.remote_host_row.setVisible(is_local)
+        self._fields.remote_port_row.setVisible(is_local)
+        self._fields.setVisible(True)
         self._edit_actions_widget.setVisible(True)
 
     def _on_save_edit(self) -> None:
         alias = self.host_combo.currentText()
-        self._save_all_tunnel_fields(alias)
+        if not self._save_all_tunnel_fields(alias):
+            return
         self._in_edit_override = False
         self._edit_actions_widget.setVisible(False)
         self._on_host_changed(alias)  # refresh to read-only display
@@ -405,24 +360,30 @@ class TunnelTab(QWidget):
         self._edit_actions_widget.setVisible(False)
         self._on_host_changed(self.host_combo.currentText())  # restore read-only display
 
-    def _save_all_tunnel_fields(self, alias: str) -> None:
-        """Persist tunnel topology to the JSON supplement (edit-override path)."""
-        supplement = repository.find_by_name(alias)
+    def _save_all_tunnel_fields(self, alias: str) -> bool:
+        """Persist tunnel topology to the JSON supplement (edit-override path).
 
-        mode = self._mode_combo.currentData()
-        try:
-            local_port = int(self._local_port_field.text())
-        except ValueError:
-            local_port = supplement.local_port if supplement else None
-        remote_host = self._remote_host_field.text().strip() or None
-        try:
-            remote_port = int(self._remote_port_field.text())
-        except ValueError:
-            remote_port = supplement.remote_port if supplement else None
+        Returns True on success. Shows an inline error and returns False if
+        any field is missing or malformed — never silently drops a typo.
+        """
+        mode = self._fields.current_mode()
 
+        local_port = parse_port(self._fields.local_port_field.text())
         if local_port is None:
-            _log.warning("Cannot save tunnel supplement for '%s': local_port missing", alias)
-            return
+            self._show_fields_error("Local port must be a number between 1 and 65535.")
+            return False
+
+        remote_host: str | None = None
+        remote_port: int | None = None
+        if mode == TunnelMode.LOCAL:
+            remote_host = self._fields.remote_host_field.text().strip() or None
+            if not remote_host:
+                self._show_fields_error("Remote host is required for LOCAL mode.")
+                return False
+            remote_port = parse_port(self._fields.remote_port_field.text())
+            if remote_port is None:
+                self._show_fields_error("Remote port must be a number between 1 and 65535.")
+                return False
 
         repository.upsert(TunnelSupplement(
             name        = alias,
@@ -432,12 +393,8 @@ class TunnelTab(QWidget):
             remote_port = remote_port,
         ))
         _log.info("Tunnel supplement saved for host: %s", alias)
-
-    def _on_mode_changed(self, _index: int) -> None:
-        mode = self._mode_combo.currentData()
-        is_local = (mode == TunnelMode.LOCAL)
-        self._remote_host_row.setVisible(is_local)
-        self._remote_port_row.setVisible(is_local)
+        self._clear_fields_error()
+        return True
 
     # ------------------------------------------------------------------
     # SSH config editor
@@ -448,15 +405,30 @@ class TunnelTab(QWidget):
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
+
+        # Respect $VISUAL/$EDITOR when set, same convention as git/crontab/etc.
+        # ~/.ssh/config has no extension, so OS-level "open with default app"
+        # resolution is often ambiguous and falls back to an app picker.
+        editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+        if editor:
+            try:
+                subprocess.Popen([*shlex.split(editor), str(path)])  # noqa: S603 — editor from user's own env
+                return
+            except OSError as exc:
+                _log.warning(
+                    "Could not launch $VISUAL/$EDITOR (%r): %s — falling back to OS default",
+                    editor, exc,
+                )
+
         if sys.platform == "win32":
-            os.startfile(path)
+            os.startfile(path)  # noqa: S606 — fixed path, not user-controlled
         elif sys.platform == "darwin":
-            subprocess.run(["open", str(path)])
+            subprocess.run(["open", str(path)])  # noqa: S603,S607 — fixed launcher, fixed path
         else:
-            subprocess.run(["xdg-open", str(path)])
+            subprocess.run(["xdg-open", str(path)])  # noqa: S603,S607 — fixed launcher, fixed path
 
     def _on_add_manual(self) -> None:
-        dialog = ManualTunnelDialog(self)
+        dialog = ManualTunnelDialog(self, taken_names=self._taken_manual_names())
         if dialog.exec() != ManualTunnelDialog.DialogCode.Accepted:
             return
         config = dialog.tunnel_config()
@@ -466,27 +438,26 @@ class TunnelTab(QWidget):
         if idx >= 0:
             self.host_combo.setCurrentIndex(idx)
 
+    def _taken_manual_names(self) -> set[str]:
+        """Names a new/renamed manual entry must not collide with — SSH-config
+        hosts silently disappear from the host list if a manual entry shadows
+        their name, so this is enforced at add/edit time instead."""
+        return set(ssh_config.load_hosts()) | set(self._manual_configs.keys())
+
     # ------------------------------------------------------------------
     # Auth building
     # ------------------------------------------------------------------
 
-    def _browse_key(self) -> None:
-        start = str(Path.home() / ".ssh")
-        path, _ = QFileDialog.getOpenFileName(self, "Select private key", start, "All files (*)")
-        if path:
-            self._key_path_field.setText(path)
-
     def _on_auth_radio_changed(self, password_checked: bool) -> None:
         self._password_row.setVisible(password_checked)
-        self._key_row.setVisible(not password_checked)
 
-    def _build_auth(self, config: TunnelConfig) -> Optional[AuthStrategy]:
-        if self._radio_password.isChecked():
+    def _build_auth(self, config: TunnelConfig) -> AuthStrategy | None:
+        if self._auth.is_password():
             return PasswordAuth(config.ssh_user, self._password_field.text())
 
         # Private key — probe whether passphrase is needed (main thread, safe for dialog)
-        key_path = self._key_path_field.text().strip() or None
-        passphrase: Optional[str] = None
+        key_path = self._auth.key_path()
+        passphrase: str | None = None
         try:
             load_private_key(key_path)
         except paramiko.PasswordRequiredException:
@@ -494,9 +465,9 @@ class TunnelTab(QWidget):
             if dialog.exec() != PassphraseDialog.DialogCode.Accepted:
                 return None
             passphrase = dialog.passphrase() or None
-        except Exception:
+        except Exception as exc:
             # Other errors (file not found, wrong format) will surface in the worker
-            pass
+            _log.debug("Private key probe failed (will surface in worker): %s", exc)
 
         return PrivateKeyAuth(config.ssh_user, key_path, passphrase=passphrase)
 
@@ -511,7 +482,8 @@ class TunnelTab(QWidget):
         if alias in self._manual_configs:
             config = self._manual_configs[alias]
         else:
-            self._save_tunnel_fields(alias)
+            if not self._save_tunnel_fields(alias):
+                return
             try:
                 config = resolve_tunnel(alias)
             except ValueError as exc:
@@ -526,30 +498,56 @@ class TunnelTab(QWidget):
         _log.info("Start requested for host: %s", alias)
         self._manager.start(config, auth)
 
-    def _save_tunnel_fields(self, alias: str) -> None:
-        """Persist any manually filled tunnel fields to the JSON supplement."""
+    def _save_tunnel_fields(self, alias: str) -> bool:
+        """Persist any manually filled tunnel fields to the JSON supplement.
+
+        Returns True if there was nothing to save, or saving succeeded. Shows
+        an inline error and returns False if a filled-in gap field is invalid.
+        """
         gaps = peek_tunnel_gaps(alias)
         if not gaps:
-            return
+            return True
 
         supplement = repository.find_by_name(alias)
 
-        mode = self._mode_combo.currentData() if "mode" in gaps else (supplement.mode if supplement else TunnelMode.LOCAL)
+        mode = (
+            self._fields.current_mode() if "mode" in gaps
+            else (supplement.mode if supplement else TunnelMode.LOCAL)
+        )
 
-        try:
-            local_port = int(self._local_port_field.text()) if "local_port" in gaps else (supplement.local_port if supplement else None)
-        except ValueError:
+        if "local_port" in gaps:
+            local_port = parse_port(self._fields.local_port_field.text())
+            if local_port is None:
+                self._show_fields_error("Local port must be a number between 1 and 65535.")
+                return False
+        else:
             local_port = supplement.local_port if supplement else None
 
-        remote_host = (self._remote_host_field.text() or None) if "remote_host" in gaps else (supplement.remote_host if supplement else None)
+        if "remote_host" in gaps:
+            if mode == TunnelMode.LOCAL:
+                remote_host = self._fields.remote_host_field.text().strip() or None
+                if not remote_host:
+                    self._show_fields_error("Remote host is required for LOCAL mode.")
+                    return False
+            else:
+                remote_host = None
+        else:
+            remote_host = supplement.remote_host if supplement else None
 
-        try:
-            remote_port = int(self._remote_port_field.text()) if "remote_port" in gaps else (supplement.remote_port if supplement else None)
-        except ValueError:
+        if "remote_port" in gaps:
+            if mode == TunnelMode.LOCAL:
+                remote_port = parse_port(self._fields.remote_port_field.text())
+                if remote_port is None:
+                    self._show_fields_error("Remote port must be a number between 1 and 65535.")
+                    return False
+            else:
+                remote_port = None
+        else:
             remote_port = supplement.remote_port if supplement else None
 
         if local_port is None:
-            return  # not enough to save yet
+            self._show_fields_error("Local port is required.")
+            return False
 
         repository.upsert(TunnelSupplement(
             name        = alias,
@@ -558,6 +556,8 @@ class TunnelTab(QWidget):
             remote_host = remote_host,
             remote_port = remote_port,
         ))
+        self._clear_fields_error()
+        return True
 
     def _on_stop(self) -> None:
         self._manager.stop()
@@ -584,7 +584,7 @@ class TunnelTab(QWidget):
         self._lock_form(True)
         self.start_btn.setVisible(False)
         self.stop_btn.setVisible(True)
-        self.stop_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
         self._update_status("connecting", "Connecting…")
 
     def _set_connected(self) -> None:
@@ -600,7 +600,7 @@ class TunnelTab(QWidget):
     def _lock_form(self, locked: bool) -> None:
         self.host_combo.setEnabled(not locked)
         self._password_field.setEnabled(not locked)
-        self._tunnel_fields_widget.setEnabled(not locked)
+        self._fields.setEnabled(not locked)
         self._config_display_widget.setEnabled(not locked)
         self._edit_actions_widget.setEnabled(not locked)
 
@@ -664,8 +664,5 @@ class TabBar(QWidget):
 
         self.tunnel_tab = TunnelTab()
         tab_bar.addTab(self.tunnel_tab, "Tunnels")
-
-        settings = QWidget(self)
-        tab_bar.addTab(settings, "Settings")
 
         layout.addWidget(tab_bar, 0, QtCore.Qt.AlignmentFlag.AlignTop)

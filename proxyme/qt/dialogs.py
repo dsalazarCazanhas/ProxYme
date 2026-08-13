@@ -1,13 +1,20 @@
 import getpass
-from pathlib import Path
-from typing import Optional
 
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QDialogButtonBox, QComboBox, QRadioButton, QPushButton,
-    QFileDialog, QWidget, QButtonGroup,
+    QApplication,
+    QDialog,
+    QDialogButtonBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QPushButton,
+    QVBoxLayout,
 )
 
+from proxyme.qt.forms import AuthMethodFields, TunnelFieldsForm, labeled_row, parse_port
+from proxyme.storage.ssh_config import format_host_block
 from proxyme.tunnel.models import AuthMethod, TunnelConfig, TunnelMode
 
 
@@ -43,109 +50,66 @@ class PassphraseDialog(QDialog):
 class ManualTunnelDialog(QDialog):
     """Dialog for creating or editing a manual tunnel entry (no SSH config required)."""
 
-    def __init__(self, parent=None, existing: Optional[TunnelConfig] = None) -> None:
+    def __init__(
+        self,
+        parent=None,
+        existing: TunnelConfig | None = None,
+        taken_names: set[str] | None = None,
+    ) -> None:
         super().__init__(parent)
         editing = existing is not None
         self.setWindowTitle("Edit Manual Tunnel" if editing else "Add Manual Tunnel")
         self.setModal(True)
         self.setMinimumWidth(420)
+        self._taken_names = taken_names or set()
 
         root = QVBoxLayout(self)
         root.setSpacing(8)
 
-        def _row(label: str, widget: QWidget) -> QHBoxLayout:
-            row = QHBoxLayout()
-            lbl = QLabel(label)
-            lbl.setFixedWidth(100)
-            row.addWidget(lbl)
-            row.addWidget(widget, stretch=1)
-            return row
-
         # Name
         self._name = QLineEdit()
         self._name.setPlaceholderText("e.g. my-server")
-        root.addLayout(_row("Name:", self._name))
+        root.addLayout(labeled_row("Name:", self._name))
 
         # SSH Host
         self._host = QLineEdit()
         self._host.setPlaceholderText("hostname or IP")
-        root.addLayout(_row("SSH Host:", self._host))
+        root.addLayout(labeled_row("SSH Host:", self._host))
 
         # SSH Port
         self._port = QLineEdit("22")
-        root.addLayout(_row("SSH Port:", self._port))
+        root.addLayout(labeled_row("SSH Port:", self._port))
 
         # SSH User
         self._user = QLineEdit(getpass.getuser())
-        root.addLayout(_row("SSH User:", self._user))
+        root.addLayout(labeled_row("SSH User:", self._user))
 
         # --- Auth method ---
-        auth_group_widget = QWidget()
-        auth_layout = QHBoxLayout(auth_group_widget)
-        auth_layout.setContentsMargins(0, 0, 0, 0)
-        self._auth_group = QButtonGroup(self)
-        self._radio_password = QRadioButton("Password")
-        self._radio_key      = QRadioButton("Private key")
-        self._radio_password.setChecked(True)
-        self._auth_group.addButton(self._radio_password)
-        self._auth_group.addButton(self._radio_key)
-        auth_layout.addWidget(self._radio_password)
-        auth_layout.addWidget(self._radio_key)
-        auth_layout.addStretch()
-        root.addLayout(_row("Auth:", auth_group_widget))
+        self._auth = AuthMethodFields()
+        root.addWidget(self._auth)
 
-        # Identity file row (visible only when Private key selected)
-        self._key_row = QWidget()
-        key_layout = QHBoxLayout(self._key_row)
-        key_layout.setContentsMargins(0, 0, 0, 0)
-        self._key_path = QLineEdit()
-        self._key_path.setPlaceholderText("path to private key")
-        self._key_browse = QPushButton("Browse…")
-        self._key_browse.clicked.connect(self._browse_key)
-        key_layout.addWidget(self._key_path, stretch=1)
-        key_layout.addWidget(self._key_browse)
-        self._key_row.setVisible(False)
-        root.addLayout(_row("Identity file:", self._key_row))
-
-        self._radio_key.toggled.connect(self._key_row.setVisible)
-
-        # --- Mode ---
-        self._mode_combo = QComboBox()
-        self._mode_combo.addItem("LOCAL  (-L)",  TunnelMode.LOCAL)
-        self._mode_combo.addItem("DYNAMIC (-D)", TunnelMode.DYNAMIC)
-        self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
-        root.addLayout(_row("Mode:", self._mode_combo))
-
-        # Local port
-        self._local_port = QLineEdit()
-        self._local_port.setPlaceholderText("e.g. 5432")
-        root.addLayout(_row("Local port:", self._local_port))
-
-        # Remote host
-        self._remote_host_row = QWidget()
-        rh_layout = QHBoxLayout(self._remote_host_row)
-        rh_layout.setContentsMargins(0, 0, 0, 0)
-        self._remote_host = QLineEdit()
-        self._remote_host.setPlaceholderText("e.g. db.internal")
-        rh_layout.addWidget(self._remote_host)
-        root.addLayout(_row("Remote host:", self._remote_host_row))
-
-        # Remote port
-        self._remote_port_row = QWidget()
-        rp_layout = QHBoxLayout(self._remote_port_row)
-        rp_layout.setContentsMargins(0, 0, 0, 0)
-        self._remote_port = QLineEdit()
-        self._remote_port.setPlaceholderText("e.g. 5432")
-        rp_layout.addWidget(self._remote_port)
-        root.addLayout(_row("Remote port:", self._remote_port_row))
+        # --- Tunnel topology ---
+        self._fields = TunnelFieldsForm()
+        root.addWidget(self._fields)
 
         # Buttons
+        buttons_row = QHBoxLayout()
+        self._show_config_btn = QPushButton("Show SSH config…")
+        self._show_config_btn.setToolTip(
+            "ProxYme never writes to ~/.ssh/config — preview the equivalent "
+            "Host block here and paste it in yourself if you want to keep it."
+        )
+        self._show_config_btn.clicked.connect(self._on_show_config)
+        buttons_row.addWidget(self._show_config_btn)
+        buttons_row.addStretch()
+
         self._buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         self._buttons.accepted.connect(self._on_accept)
         self._buttons.rejected.connect(self.reject)
-        root.addWidget(self._buttons)
+        buttons_row.addWidget(self._buttons)
+        root.addLayout(buttons_row)
 
         self._error_label = QLabel()
         self._error_label.setStyleSheet("color: #C0392B;")
@@ -160,82 +124,66 @@ class ManualTunnelDialog(QDialog):
             self._port.setText(str(existing.ssh_port))
             self._user.setText(existing.ssh_user)
             if existing.auth_method == AuthMethod.PRIVATE_KEY:
-                self._radio_key.setChecked(True)
-                self._key_path.setText(existing.key_path or "")
-                self._key_row.setVisible(True)
-            idx = self._mode_combo.findData(existing.mode)
-            if idx >= 0:
-                self._mode_combo.setCurrentIndex(idx)
-            self._local_port.setText(str(existing.local_port))
-            self._remote_host.setText(existing.remote_host or "")
-            self._remote_port.setText(str(existing.remote_port) if existing.remote_port else "")
-            is_local = existing.mode == TunnelMode.LOCAL
-            self._remote_host_row.setVisible(is_local)
-            self._remote_port_row.setVisible(is_local)
+                self._auth.set_private_key(existing.key_path)
+            self._fields.set_values(
+                existing.mode, existing.local_port, existing.remote_host, existing.remote_port,
+            )
 
     # ------------------------------------------------------------------
 
-    def _on_mode_changed(self, _index: int) -> None:
-        is_local = self._mode_combo.currentData() == TunnelMode.LOCAL
-        self._remote_host_row.setVisible(is_local)
-        self._remote_port_row.setVisible(is_local)
+    def _try_build_config(self) -> TunnelConfig | None:
+        """Validate the current field values and build a TunnelConfig from them.
 
-    def _browse_key(self) -> None:
-        start = str(Path.home() / ".ssh")
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select private key", start, "All files (*)"
-        )
-        if path:
-            self._key_path.setText(path)
-
-    def _on_accept(self) -> None:
+        Shows an inline error and returns None if anything required is missing
+        or malformed. Used by both the OK button and the "Show SSH config" preview.
+        """
         name     = self._name.text().strip()
         ssh_host = self._host.text().strip()
         ssh_user = self._user.text().strip() or getpass.getuser()
 
-        try:
-            ssh_port = int(self._port.text())
-        except ValueError:
-            self._show_error("SSH Port must be a number.")
-            return
-
-        try:
-            local_port = int(self._local_port.text())
-        except ValueError:
-            self._show_error("Local port must be a number.")
-            return
-
         if not name:
             self._show_error("Name is required.")
-            return
+            return None
+        if name in self._taken_names:
+            self._show_error(f"'{name}' already exists — choose a different name.")
+            return None
         if not ssh_host:
             self._show_error("SSH Host is required.")
-            return
+            return None
 
-        mode = self._mode_combo.currentData()
-        remote_host: Optional[str] = None
-        remote_port: Optional[int] = None
+        ssh_port = parse_port(self._port.text())
+        if ssh_port is None:
+            self._show_error("SSH Port must be a number between 1 and 65535.")
+            return None
+
+        local_port = parse_port(self._fields.local_port_field.text())
+        if local_port is None:
+            self._show_error("Local port must be a number between 1 and 65535.")
+            return None
+
+        mode = self._fields.current_mode()
+        remote_host: str | None = None
+        remote_port: int | None = None
 
         if mode == TunnelMode.LOCAL:
-            remote_host = self._remote_host.text().strip() or None
+            remote_host = self._fields.remote_host_field.text().strip() or None
             if not remote_host:
                 self._show_error("Remote host is required for LOCAL mode.")
-                return
-            try:
-                remote_port = int(self._remote_port.text())
-            except ValueError:
-                self._show_error("Remote port must be a number.")
-                return
+                return None
+            remote_port = parse_port(self._fields.remote_port_field.text())
+            if remote_port is None:
+                self._show_error("Remote port must be a number between 1 and 65535.")
+                return None
 
-        auth_method = AuthMethod.PRIVATE_KEY if self._radio_key.isChecked() else AuthMethod.PASSWORD
-        key_path: Optional[str] = None
+        auth_method = AuthMethod.PASSWORD if self._auth.is_password() else AuthMethod.PRIVATE_KEY
+        key_path: str | None = None
         if auth_method == AuthMethod.PRIVATE_KEY:
-            key_path = self._key_path.text().strip() or None
+            key_path = self._auth.key_path()
             if not key_path:
                 self._show_error("Identity file is required for private key auth.")
-                return
+                return None
 
-        self._config = TunnelConfig(
+        return TunnelConfig(
             name        = name,
             ssh_host    = ssh_host,
             ssh_port    = ssh_port,
@@ -247,7 +195,19 @@ class ManualTunnelDialog(QDialog):
             remote_port = remote_port,
             key_path    = key_path,
         )
+
+    def _on_accept(self) -> None:
+        config = self._try_build_config()
+        if config is None:
+            return
+        self._config = config
         self.accept()
+
+    def _on_show_config(self) -> None:
+        config = self._try_build_config()
+        if config is None:
+            return
+        SshConfigPreviewDialog(self, format_host_block(config)).exec()
 
     def _show_error(self, message: str) -> None:
         self._error_label.setText(message)
@@ -256,3 +216,38 @@ class ManualTunnelDialog(QDialog):
     def tunnel_config(self) -> TunnelConfig:
         """Call only after Dialog.Accepted."""
         return self._config
+
+
+class SshConfigPreviewDialog(QDialog):
+    """Read-only preview of a ~/.ssh/config Host block, with a copy-to-clipboard button.
+
+    ProxYme never writes to ~/.ssh/config — this just renders the text so the
+    user can paste it in themselves if they want the entry to persist.
+    """
+
+    def __init__(self, parent, snippet: str) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("SSH config preview")
+        self.setModal(True)
+        self.setMinimumSize(420, 220)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Paste this into your ~/.ssh/config:"))
+
+        self._text = QPlainTextEdit(snippet)
+        self._text.setReadOnly(True)
+        self._text.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        layout.addWidget(self._text)
+
+        btn_row = QHBoxLayout()
+        copy_btn = QPushButton("Copy to clipboard")
+        copy_btn.clicked.connect(self._copy)
+        btn_row.addWidget(copy_btn)
+        btn_row.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+    def _copy(self) -> None:
+        QApplication.clipboard().setText(self._text.toPlainText())
