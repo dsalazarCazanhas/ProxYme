@@ -1,6 +1,11 @@
 # ProxYme
 
+[![CI](https://github.com/dsalazarCazanhas/ProxYme/actions/workflows/ci.yml/badge.svg)](https://github.com/dsalazarCazanhas/ProxYme/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A lightweight SSH tunnel manager with a PySide6 GUI for Windows and Linux.
+
+![ProxYme screenshot](docs/screenshot.png)
 
 ## What it does
 
@@ -24,3 +29,9 @@ A lightweight SSH tunnel manager with a PySide6 GUI for Windows and Linux.
 uv sync
 uv run python main.py
 ```
+
+Check which version you're running with `uv run python main.py --version`.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests, and lint instructions.

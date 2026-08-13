@@ -1,11 +1,10 @@
-from typing import Optional
 
 import paramiko
 
 from .base import AuthStrategy
 
 
-def load_private_key(key_path: Optional[str], passphrase: Optional[str] = None) -> paramiko.PKey:
+def load_private_key(key_path: str | None, passphrase: str | None = None) -> paramiko.PKey:
     """
     Load a private key trying each supported type in order.
     Raises PasswordRequiredException if the key is passphrase-protected and none was given.
@@ -36,7 +35,7 @@ def load_private_key(key_path: Optional[str], passphrase: Optional[str] = None) 
 
 
 class PrivateKeyAuth(AuthStrategy):
-    def __init__(self, username: str, key_path: Optional[str], passphrase: Optional[str] = None) -> None:
+    def __init__(self, username: str, key_path: str | None, passphrase: str | None = None) -> None:
         self._username   = username
         self._key_path   = key_path
         self._passphrase = passphrase

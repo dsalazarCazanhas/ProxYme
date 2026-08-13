@@ -22,7 +22,9 @@ def _purge_old_logs() -> None:
         except OSError:
             pass
     if removed:
-        logging.getLogger(__name__).info("Purged %d log file(s) older than %d days", removed, _KEEP_DAYS)
+        logging.getLogger(__name__).info(
+            "Purged %d log file(s) older than %d days", removed, _KEEP_DAYS,
+        )
 
 
 def init_logging() -> None:

@@ -1,16 +1,25 @@
+import argparse
 import logging
 import signal
 import sys
+from importlib.metadata import version
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from proxyme.logging_setup import init_logging
-from proxyme.single_instance import acquire, release
 from proxyme.qt.main_window import MainWindow
+from proxyme.single_instance import acquire, release
 
 
 def main():
+    parser = argparse.ArgumentParser(description="ProxYme — SSH tunnel manager")
+    parser.add_argument("--version", action="store_true", help="print version and exit")
+    args = parser.parse_args()
+    if args.version:
+        print(f"ProxYme {version('proxyme')}")
+        return
+
     init_logging()
     log = logging.getLogger(__name__)
 

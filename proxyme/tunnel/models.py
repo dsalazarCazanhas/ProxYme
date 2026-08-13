@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 
 class TunnelMode(Enum):
@@ -9,7 +8,7 @@ class TunnelMode(Enum):
 
 
 class AuthMethod(Enum):
-    PASSWORD    = "password"
+    PASSWORD    = "password"  # noqa: S105 — enum discriminator, not a credential
     PRIVATE_KEY = "private_key"
 
 
@@ -22,6 +21,6 @@ class TunnelConfig:
     auth_method: AuthMethod
     mode:        TunnelMode
     local_port:  int
-    remote_host: Optional[str]  # None when mode=DYNAMIC
-    remote_port: Optional[int]  # None when mode=DYNAMIC
-    key_path:    Optional[str]  # path to private key file; None when auth_method=PASSWORD
+    remote_host: str | None  # None when mode=DYNAMIC
+    remote_port: int | None  # None when mode=DYNAMIC
+    key_path:    str | None  # path to private key file; None when auth_method=PASSWORD

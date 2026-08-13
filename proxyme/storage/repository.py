@@ -3,7 +3,6 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from proxyme.tunnel.models import TunnelMode
 
@@ -15,10 +14,10 @@ _CONFIG_FILE = _CONFIG_DIR / "tunnels.json"
 class TunnelSupplement:
     """Stores only non-sensitive tunnel topology fields (never credentials)."""
     name:        str
-    mode:        Optional[TunnelMode] = None
-    local_port:  Optional[int]        = None
-    remote_host: Optional[str]        = None
-    remote_port: Optional[int]        = None
+    mode:        TunnelMode | None = None
+    local_port:  int | None        = None
+    remote_host: str | None        = None
+    remote_port: int | None        = None
 
 
 def _to_dict(s: TunnelSupplement) -> dict:
@@ -67,7 +66,7 @@ def save_all(supplements: list[TunnelSupplement]) -> None:
     _secure_write(json.dumps([_to_dict(s) for s in supplements], indent=2))
 
 
-def find_by_name(name: str) -> Optional[TunnelSupplement]:
+def find_by_name(name: str) -> TunnelSupplement | None:
     return next((s for s in load_all() if s.name == name), None)
 
 
