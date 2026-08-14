@@ -34,6 +34,15 @@ a = Analysis(
     noarchive=False,
 )
 
+# PyInstaller bundles the build machine's libfontconfig.so (from ubuntu-22.04 in
+# CI). On a system whose fontconfig config files use newer XML schema features
+# than that build understands — e.g. a rolling-release distro — the bundled lib
+# fails to parse them and spams "invalid attribute"/"invalid constant" warnings
+# on stderr. Cosmetic (fontconfig falls back to defaults), but excluding it here
+# makes the binary dynamically link the host's own fontconfig instead, which
+# always matches its own config files.
+a.binaries = [b for b in a.binaries if not b[0].startswith("libfontconfig")]
+
 pyz = PYZ(a.pure, a.zipped_data)
 
 exe = EXE(
