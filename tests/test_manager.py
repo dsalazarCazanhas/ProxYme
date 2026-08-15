@@ -1,3 +1,5 @@
+import logging
+import socket
 from pathlib import Path
 
 import paramiko
@@ -132,3 +134,70 @@ class TestSocks5RecvExact:
         handler = self._FakeHandler(b"")
         with pytest.raises(ConnectionResetError):
             _Socks5Handler._recv_exact(handler, 3)
+
+
+class TestLocalBindFailure:
+    """Regression coverage for a real bug found in production: when the SSH
+    handshake succeeds but binding the local listener fails (e.g. the local
+    port is already in use), the actual error used to vanish — it was only
+    emitted as a Qt signal, never logged, and the UI briefly showed
+    "Connected" before flipping back to idle with no visible reason why."""
+
+    @pytest.fixture
+    def occupied_port(self):
+        blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        blocker.bind(("127.0.0.1", 0))
+        blocker.listen(1)
+        port = blocker.getsockname()[1]
+        yield port
+        blocker.close()
+
+    def _worker_with_mocked_ssh(self, mocker, config):
+        worker = TunnelWorker(config, auth=mocker.Mock())
+        mocker.patch("socket.create_connection", return_value=mocker.Mock())
+        mocker.patch("paramiko.Transport", return_value=mocker.Mock(is_active=lambda: False))
+        mocker.patch.object(worker, "_verify_host_key", return_value=(True, ""))
+        return worker
+
+    def test_bind_failure_is_logged_not_just_signaled(self, occupied_port, mocker, caplog):
+        config = _make_config(mode=TunnelMode.DYNAMIC, local_port=occupied_port,
+                               remote_host=None, remote_port=None)
+        worker = self._worker_with_mocked_ssh(mocker, config)
+
+        failed_messages = []
+        worker.failed.connect(failed_messages.append)
+
+        with caplog.at_level(logging.WARNING, logger="proxyme.tunnel.manager"):
+            worker.run()
+
+        assert failed_messages, "failed signal should fire when the local bind fails"
+        assert any(
+            "connection failed" in rec.message.lower() and failed_messages[0] in rec.message
+            for rec in caplog.records
+        ), "the actual bind error must be logged, not only emitted as a signal"
+
+    def test_connected_signal_does_not_fire_before_bind_succeeds(self, occupied_port, mocker):
+        config = _make_config(mode=TunnelMode.DYNAMIC, local_port=occupied_port,
+                               remote_host=None, remote_port=None)
+        worker = self._worker_with_mocked_ssh(mocker, config)
+
+        connected = mocker.Mock()
+        worker.connected.connect(connected)
+
+        worker.run()
+
+        connected.assert_not_called()
+
+    def test_local_mode_bind_failure_also_logged(self, occupied_port, mocker, caplog):
+        config = _make_config(mode=TunnelMode.LOCAL, local_port=occupied_port,
+                               remote_host="db.internal", remote_port=5432)
+        worker = self._worker_with_mocked_ssh(mocker, config)
+
+        failed_messages = []
+        worker.failed.connect(failed_messages.append)
+
+        with caplog.at_level(logging.WARNING, logger="proxyme.tunnel.manager"):
+            worker.run()
+
+        assert failed_messages
+        assert any("connection failed" in rec.message.lower() for rec in caplog.records)

@@ -228,6 +228,21 @@ class TunnelWorker(QObject):
                 self._close_connecting()
                 return
             self._auth.apply(self._transport)
+
+            # Bind the local listener while still in the "connecting" phase —
+            # a failure here (e.g. the local port is already in use) gets
+            # reported the same way as an auth/handshake failure, instead of
+            # flashing "Connected" for an instant and then dying, with the
+            # real reason visible nowhere but a signal nobody logged.
+            if self._config.mode == TunnelMode.LOCAL:
+                assert self._config.remote_host is not None
+                assert self._config.remote_port is not None
+                self._server = _ForwardServer(
+                    self._config.local_port, self._transport,
+                    self._config.remote_host, self._config.remote_port,
+                )
+            elif self._config.mode == TunnelMode.DYNAMIC:
+                self._server = _Socks5Server(self._config.local_port, self._transport)
         except Exception as exc:
             if self._cancelled:
                 _log.info("Connection attempt cancelled by user")
@@ -243,11 +258,9 @@ class TunnelWorker(QObject):
 
         # --- run the forwarding loop (blocks until stop() is called) ---
         try:
-            if self._config.mode == TunnelMode.LOCAL:
-                self._run_local()
-            elif self._config.mode == TunnelMode.DYNAMIC:
-                self._run_dynamic()
+            self._server.serve_forever()
         except Exception as exc:
+            _log.warning("Tunnel serving loop failed: %s", exc)
             self.failed.emit(str(exc))
         finally:
             if self._transport and self._transport.is_active():
@@ -267,26 +280,6 @@ class TunnelWorker(QObject):
                 self._sock.close()
             except OSError as exc:
                 _log.debug("Error closing socket after failed connect: %s", exc)
-
-    def _run_local(self) -> None:
-        assert self._transport is not None
-        assert self._config.remote_host is not None
-        assert self._config.remote_port is not None
-        self._server = _ForwardServer(
-            self._config.local_port,
-            self._transport,
-            self._config.remote_host,
-            self._config.remote_port,
-        )
-        self._server.serve_forever()  # blocks; released by shutdown() from stop()
-
-    def _run_dynamic(self) -> None:
-        assert self._transport is not None
-        self._server = _Socks5Server(
-            self._config.local_port,
-            self._transport,
-        )
-        self._server.serve_forever()  # blocks; released by shutdown() from stop()
 
     def _verify_host_key(self) -> tuple[bool, str]:
         """TOFU host key verification. Returns (ok, error_message)."""
