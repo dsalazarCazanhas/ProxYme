@@ -9,6 +9,14 @@ _DATE       = "%Y-%m-%d %H:%M:%S"
 _KEEP_DAYS  = 30
 
 
+def latest_log_file() -> Path | None:
+    """Return the most recently modified session log file, or None if there are none."""
+    if not _LOG_DIR.exists():
+        return None
+    logs = sorted(_LOG_DIR.glob("proxyme-*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return logs[0] if logs else None
+
+
 def _purge_old_logs() -> None:
     """Delete log files older than _KEEP_DAYS days."""
     cutoff = datetime.now() - timedelta(days=_KEEP_DAYS)

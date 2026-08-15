@@ -1,8 +1,4 @@
 import logging
-import os
-import shlex
-import subprocess
-import sys
 from pathlib import Path
 from typing import ClassVar
 
@@ -22,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from proxyme.qt.dialogs import ManualTunnelDialog, PassphraseDialog
 from proxyme.qt.forms import AuthMethodFields, TunnelFieldsForm, parse_port
+from proxyme.qt.system_open import open_path
 from proxyme.storage import repository, ssh_config
 from proxyme.storage.repository import TunnelSupplement
 from proxyme.storage.ssh_config import (
@@ -405,27 +402,10 @@ class TunnelTab(QWidget):
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
-
-        # Respect $VISUAL/$EDITOR when set, same convention as git/crontab/etc.
         # ~/.ssh/config has no extension, so OS-level "open with default app"
-        # resolution is often ambiguous and falls back to an app picker.
-        editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
-        if editor:
-            try:
-                subprocess.Popen([*shlex.split(editor), str(path)])  # noqa: S603 — editor from user's own env
-                return
-            except OSError as exc:
-                _log.warning(
-                    "Could not launch $VISUAL/$EDITOR (%r): %s — falling back to OS default",
-                    editor, exc,
-                )
-
-        if sys.platform == "win32":
-            os.startfile(path)  # noqa: S606 — fixed path, not user-controlled
-        elif sys.platform == "darwin":
-            subprocess.run(["open", str(path)])  # noqa: S603,S607 — fixed launcher, fixed path
-        else:
-            subprocess.run(["xdg-open", str(path)])  # noqa: S603,S607 — fixed launcher, fixed path
+        # resolution is often ambiguous and falls back to an app picker —
+        # open_path() tries $VISUAL/$EDITOR first to sidestep that.
+        open_path(path)
 
     def _on_add_manual(self) -> None:
         dialog = ManualTunnelDialog(self, taken_names=self._taken_manual_names())
