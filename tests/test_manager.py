@@ -1,5 +1,7 @@
 import logging
 import socket
+import threading
+import time
 from pathlib import Path
 
 import paramiko
@@ -201,3 +203,55 @@ class TestLocalBindFailure:
 
         assert failed_messages
         assert any("connection failed" in rec.message.lower() for rec in caplog.records)
+
+
+class TestStopReleasesTheLocalPort:
+    """Regression test for a real bug found in production: stop() called
+    server.shutdown() (which only stops the serve_forever() loop) but never
+    server_close() (which actually releases the socket), so the local port
+    stayed bound after "stop" and the next Start always failed with
+    "Address already in use"."""
+
+    def _worker_with_mocked_ssh(self, mocker, config):
+        worker = TunnelWorker(config, auth=mocker.Mock())
+        mocker.patch("socket.create_connection", return_value=mocker.Mock())
+        mocker.patch("paramiko.Transport", return_value=mocker.Mock(is_active=lambda: False))
+        mocker.patch.object(worker, "_verify_host_key", return_value=(True, ""))
+        return worker
+
+    def test_local_port_is_free_again_immediately_after_stop(self, mocker):
+        # Let the OS hand out a free port rather than guessing one.
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()
+
+        config = _make_config(mode=TunnelMode.DYNAMIC, local_port=port,
+                               remote_host=None, remote_port=None)
+        worker = self._worker_with_mocked_ssh(mocker, config)
+
+        # Poll worker state directly rather than relying on Qt signals — signals
+        # emitted from a plain (non-QThread) background thread aren't delivered
+        # without an active Qt event loop pumping them, which this test has none
+        # of. Thread completion via join() needs no event loop and is reliable.
+        run_thread = threading.Thread(target=worker.run, daemon=True)
+        run_thread.start()
+
+        deadline = time.monotonic() + 5
+        while worker._server is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert worker._server is not None, "worker never reached the serving phase"
+
+        worker.stop()
+        run_thread.join(timeout=5)
+        assert not run_thread.is_alive(), "worker thread never finished stopping"
+
+        # The real assertion: the port must be immediately bindable again —
+        # this is exactly what a second Start attempt does.
+        retry = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            retry.bind(("127.0.0.1", port))
+        except OSError as exc:
+            pytest.fail(f"local port {port} was not released after stop(): {exc}")
+        finally:
+            retry.close()

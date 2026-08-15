@@ -263,6 +263,14 @@ class TunnelWorker(QObject):
             _log.warning("Tunnel serving loop failed: %s", exc)
             self.failed.emit(str(exc))
         finally:
+            # shutdown() (called from stop()) only stops serve_forever()'s loop —
+            # it does not release the listening socket. Without server_close(),
+            # the local port stays bound after "stop" and the next Start fails
+            # with "Address already in use".
+            try:
+                self._server.server_close()
+            except OSError as exc:
+                _log.debug("Error closing local listener socket: %s", exc)
             if self._transport and self._transport.is_active():
                 self._transport.close()
             _log.info("Tunnel stopped")
