@@ -233,6 +233,12 @@ class TunnelWorker(QObject):
                 self._close_connecting()
                 return
             self._auth.apply(self._transport)
+            # Without traffic, an idle NAT/firewall (or the server's own
+            # ClientAliveInterval) silently drops the connection — neither
+            # side notices until the next real use fails. A periodic
+            # keepalive generates that traffic and makes a truly dead
+            # connection fail fast instead of hanging.
+            self._transport.set_keepalive(15)
 
             # Bind the local listener while still in the "connecting" phase —
             # a failure here (e.g. the local port is already in use) gets

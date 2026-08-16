@@ -180,6 +180,26 @@ class TestBindAllInterfaces:
             server.server_close()
 
 
+class TestKeepalive:
+    """Without traffic, an idle NAT/firewall (or the server's own
+    ClientAliveInterval) silently drops the SSH connection — neither side
+    notices until the next real use fails. Regression coverage for the fix:
+    a periodic SSH keepalive must be enabled on every connection."""
+
+    def test_keepalive_is_enabled_after_authenticating(self, mocker):
+        config = _make_config(mode=TunnelMode.DYNAMIC, remote_host=None, remote_port=None)
+        worker = TunnelWorker(config, auth=mocker.Mock())
+        transport = mocker.Mock(is_active=lambda: False)
+        mocker.patch("socket.create_connection", return_value=mocker.Mock())
+        mocker.patch("paramiko.Transport", return_value=transport)
+        mocker.patch.object(worker, "_verify_host_key", return_value=(True, ""))
+        mocker.patch("proxyme.tunnel.manager._Socks5Server", side_effect=RuntimeError("stop early"))
+
+        worker.run()
+
+        transport.set_keepalive.assert_called_once_with(15)
+
+
 class TestLocalBindFailure:
     """Regression coverage for a real bug found in production: when the SSH
     handshake succeeds but binding the local listener fails (e.g. the local
