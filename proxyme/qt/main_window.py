@@ -5,7 +5,7 @@ from PySide6 import QtCore, QtGui
 from PySide6.QtWidgets import QMainWindow, QMessageBox
 
 from proxyme.logging_setup import latest_log_file
-from proxyme.qt.system_open import open_path
+from proxyme.qt.dialogs import TextFileDialog
 
 from .metas import icon
 from .widgets import TabBar
@@ -72,7 +72,7 @@ class MainWindow(QMainWindow):
         if log_file is None:
             QMessageBox.information(self, "ProxYme", "No log files found yet.")
             return
-        open_path(log_file, parent=self)
+        TextFileDialog(self, log_file, title=f"Log: {log_file.name}", read_only=True).exec()
 
     def _show_about(self) -> None:
         QMessageBox.about(

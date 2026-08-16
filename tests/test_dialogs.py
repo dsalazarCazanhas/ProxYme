@@ -1,12 +1,65 @@
 import pytest
 
-from proxyme.qt.dialogs import ManualTunnelDialog
+from proxyme.qt.dialogs import ManualTunnelDialog, TextFileDialog
 from proxyme.tunnel.models import AuthMethod, TunnelMode
 
 
 @pytest.fixture
 def dialog(qapp):
     return ManualTunnelDialog()
+
+
+class TestTextFileDialog:
+    def test_loads_existing_content(self, qapp, tmp_path):
+        path = tmp_path / "config"
+        path.write_text("Host db\n    HostName db.internal\n", encoding="utf-8")
+
+        dlg = TextFileDialog(None, path, title="Edit")
+
+        assert dlg._text.toPlainText() == "Host db\n    HostName db.internal\n"
+
+    def test_read_only_mode_disables_editing(self, qapp, tmp_path):
+        path = tmp_path / "log.txt"
+        path.write_text("some log line\n", encoding="utf-8")
+
+        dlg = TextFileDialog(None, path, title="Log", read_only=True)
+
+        assert dlg._text.isReadOnly() is True
+
+    def test_editable_mode_allows_editing(self, qapp, tmp_path):
+        path = tmp_path / "config"
+        path.write_text("original\n", encoding="utf-8")
+
+        dlg = TextFileDialog(None, path, title="Edit")
+
+        assert dlg._text.isReadOnly() is False
+
+    def test_save_writes_edited_content_back_to_disk(self, qapp, tmp_path):
+        path = tmp_path / "config"
+        path.write_text("original\n", encoding="utf-8")
+        dlg = TextFileDialog(None, path, title="Edit")
+
+        dlg._text.setPlainText("edited content\n")
+        dlg._save()
+
+        assert path.read_text(encoding="utf-8") == "edited content\n"
+
+    def test_save_closes_the_dialog(self, qapp, tmp_path, mocker):
+        path = tmp_path / "config"
+        path.write_text("original\n", encoding="utf-8")
+        dlg = TextFileDialog(None, path, title="Edit")
+        accept = mocker.patch.object(dlg, "accept")
+
+        dlg._save()
+
+        accept.assert_called_once()
+
+    def test_missing_file_opens_with_empty_content_instead_of_raising(self, qapp, tmp_path):
+        path = tmp_path / "does-not-exist"
+
+        dlg = TextFileDialog(None, path, title="Edit")
+
+        assert dlg._text.toPlainText() == ""
 
 
 def _fill_minimal_local(dlg, name="myserver", host="db.internal"):

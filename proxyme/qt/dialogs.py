@@ -1,4 +1,6 @@
 import getpass
+import logging
+from pathlib import Path
 
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
@@ -8,6 +10,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
@@ -16,6 +19,8 @@ from PySide6.QtWidgets import (
 from proxyme.qt.forms import AuthMethodFields, TunnelFieldsForm, labeled_row, parse_port
 from proxyme.storage.ssh_config import format_host_block
 from proxyme.tunnel.models import AuthMethod, TunnelConfig, TunnelMode
+
+_log = logging.getLogger(__name__)
 
 
 class PassphraseDialog(QDialog):
@@ -253,3 +258,54 @@ class SshConfigPreviewDialog(QDialog):
 
     def _copy(self) -> None:
         QApplication.clipboard().setText(self._text.toPlainText())
+
+
+class TextFileDialog(QDialog):
+    """In-app text file viewer/editor.
+
+    Launching an external program to open a file (an editor, or the OS's
+    "default app") turned out to be unreliable from the packaged binary —
+    mismatched bundled libraries, ambiguous mime-type resolution for
+    extension-less files, confusing "pick a program" dialogs. Editing
+    in-app sidesteps all of that: no subprocess, no OS integration, works
+    identically on every platform.
+    """
+
+    def __init__(self, parent, path: Path, title: str, read_only: bool = False) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.resize(640, 480)
+        self._path = path
+
+        layout = QVBoxLayout(self)
+
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            content = ""
+            _log.warning("Could not read %s: %s", path, exc)
+
+        self._text = QPlainTextEdit(content)
+        self._text.setReadOnly(read_only)
+        self._text.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        layout.addWidget(self._text)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        if not read_only:
+            save_btn = QPushButton("Save")
+            save_btn.clicked.connect(self._save)
+            btn_row.addWidget(save_btn)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+    def _save(self) -> None:
+        try:
+            self._path.write_text(self._text.toPlainText(), encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.warning(self, "Could not save", f"Failed to save {self._path}:\n{exc}")
+            return
+        self.accept()

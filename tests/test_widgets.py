@@ -1,6 +1,5 @@
 import pytest
 
-import proxyme.qt.system_open as system_open_module
 from proxyme.qt.widgets import TunnelTab
 from proxyme.storage import repository
 from proxyme.tunnel.models import TunnelMode
@@ -15,114 +14,31 @@ def tunnel_tab(isolated_ssh_config, isolated_repository, qapp):
     return TunnelTab()
 
 
-@pytest.fixture(autouse=True)
-def isolated_open_settings(tmp_path, monkeypatch):
-    """Point the remembered "open with" app setting at a throwaway file."""
-    monkeypatch.setattr(system_open_module, "_SETTINGS_FILE", tmp_path / "settings.json")
+class TestOpenSshConfig:
+    """Editing happens in-app now — launching an external program (an
+    editor, or the OS's "default app") proved unreliable from the packaged
+    binary, so there's no subprocess/OS integration left to break."""
 
+    def test_creates_the_file_if_missing(self, tunnel_tab, isolated_ssh_config, mocker):
+        assert not isolated_ssh_config.exists()
+        mocker.patch("proxyme.qt.widgets.TextFileDialog")
 
-def test_open_ssh_config_uses_editor_env_var_when_launchable(tunnel_tab, monkeypatch, mocker):
-    monkeypatch.setenv("EDITOR", "true")
-    monkeypatch.delenv("VISUAL", raising=False)
-    popen = mocker.patch("subprocess.Popen")
-    dialog = mocker.patch("proxyme.qt.system_open.QFileDialog.getOpenFileName")
+        tunnel_tab._open_ssh_config()
 
-    tunnel_tab._open_ssh_config()
+        assert isolated_ssh_config.exists()
 
-    popen.assert_called_once()
-    args = popen.call_args[0][0]
-    assert args[0] == "true"
-    assert args[-1].endswith("config")
-    dialog.assert_not_called()
-
-
-def test_open_ssh_config_splits_editor_with_arguments(tunnel_tab, monkeypatch, mocker):
-    monkeypatch.setenv("VISUAL", "code --wait")
-    popen = mocker.patch("subprocess.Popen")
-
-    tunnel_tab._open_ssh_config()
-
-    args = popen.call_args[0][0]
-    assert args[:2] == ["code", "--wait"]
-
-
-def test_open_ssh_config_prefers_visual_over_editor(tunnel_tab, monkeypatch, mocker):
-    monkeypatch.setenv("VISUAL", "visual-editor")
-    monkeypatch.setenv("EDITOR", "editor-editor")
-    popen = mocker.patch("subprocess.Popen")
-
-    tunnel_tab._open_ssh_config()
-
-    assert popen.call_args[0][0][0] == "visual-editor"
-
-
-class TestOpenPathAppPicker:
-    """No $VISUAL/$EDITOR — never silently guesses an OS "default app"
-    (that resolution proved unreliable from the packaged binary); instead
-    asks the user to pick an app once and remembers the choice."""
-
-    def _no_editor_env(self, monkeypatch):
-        monkeypatch.delenv("EDITOR", raising=False)
-        monkeypatch.delenv("VISUAL", raising=False)
-
-    def test_asks_user_to_pick_an_app_when_nothing_remembered(
-        self, tunnel_tab, monkeypatch, mocker,
+    def test_opens_an_editable_dialog_on_the_real_file(
+        self, tunnel_tab, isolated_ssh_config, mocker,
     ):
-        self._no_editor_env(monkeypatch)
-        popen = mocker.patch("subprocess.Popen")
-        mocker.patch(
-            "proxyme.qt.system_open.QFileDialog.getOpenFileName",
-            return_value=("/usr/bin/nano", ""),
-        )
+        isolated_ssh_config.write_text("Host db\n", encoding="utf-8")
+        dialog_cls = mocker.patch("proxyme.qt.widgets.TextFileDialog")
+        dialog_cls.return_value.exec.return_value = None
 
         tunnel_tab._open_ssh_config()
 
-        popen.assert_called_once()
-        args = popen.call_args[0][0]
-        assert args[0] == "/usr/bin/nano"
-        assert args[-1].endswith("config")
-
-    def test_remembers_the_chosen_app_for_next_time(self, tunnel_tab, monkeypatch, mocker):
-        self._no_editor_env(monkeypatch)
-        mocker.patch("subprocess.Popen")
-        dialog = mocker.patch(
-            "proxyme.qt.system_open.QFileDialog.getOpenFileName",
-            return_value=("/usr/bin/nano", ""),
-        )
-
-        tunnel_tab._open_ssh_config()
-        dialog.assert_called_once()
-
-        dialog.reset_mock()
-        tunnel_tab._open_ssh_config()
-        dialog.assert_not_called()
-
-    def test_does_nothing_when_the_picker_is_cancelled(self, tunnel_tab, monkeypatch, mocker):
-        self._no_editor_env(monkeypatch)
-        popen = mocker.patch("subprocess.Popen")
-        mocker.patch(
-            "proxyme.qt.system_open.QFileDialog.getOpenFileName", return_value=("", ""),
-        )
-
-        tunnel_tab._open_ssh_config()
-
-        popen.assert_not_called()
-
-    def test_asks_again_when_the_remembered_app_no_longer_exists(
-        self, tunnel_tab, monkeypatch, mocker,
-    ):
-        self._no_editor_env(monkeypatch)
-        system_open_module._save_preferred_app("/does/not/exist/editor")
-        popen = mocker.patch("subprocess.Popen")
-        dialog = mocker.patch(
-            "proxyme.qt.system_open.QFileDialog.getOpenFileName",
-            return_value=("/usr/bin/nano", ""),
-        )
-
-        tunnel_tab._open_ssh_config()
-
-        dialog.assert_called_once()
-        assert popen.call_args[0][0][0] == "/usr/bin/nano"
+        args, kwargs = dialog_cls.call_args
+        assert args[1] == isolated_ssh_config
+        assert kwargs.get("read_only", False) is False
 
 
 def test_taken_manual_names_includes_ssh_hosts_and_manual_configs(

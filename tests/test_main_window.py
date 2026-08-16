@@ -24,7 +24,11 @@ def test_view_logs_opens_the_most_recent_log_file(main_window, tmp_path, monkeyp
     log_file = tmp_path / "proxyme-2026-01-01_000000.log"
     log_file.write_text("session log", encoding="utf-8")
 
-    open_path = mocker.patch("proxyme.qt.main_window.open_path")
+    dialog_cls = mocker.patch("proxyme.qt.main_window.TextFileDialog")
+    dialog_cls.return_value.exec.return_value = None
+
     main_window._view_logs()
 
-    open_path.assert_called_once_with(log_file, parent=main_window)
+    args, kwargs = dialog_cls.call_args
+    assert args[1] == log_file
+    assert kwargs.get("read_only") is True

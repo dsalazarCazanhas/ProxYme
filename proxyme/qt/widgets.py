@@ -1,5 +1,4 @@
 import logging
-from pathlib import Path
 from typing import ClassVar
 
 import paramiko
@@ -16,9 +15,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from proxyme.qt.dialogs import ManualTunnelDialog, PassphraseDialog
+from proxyme.qt.dialogs import ManualTunnelDialog, PassphraseDialog, TextFileDialog
 from proxyme.qt.forms import AuthMethodFields, TunnelFieldsForm, parse_port
-from proxyme.qt.system_open import open_path
 from proxyme.storage import repository, ssh_config
 from proxyme.storage.repository import TunnelSupplement
 from proxyme.storage.ssh_config import (
@@ -413,11 +411,11 @@ class TunnelTab(QWidget):
     # ------------------------------------------------------------------
 
     def _open_ssh_config(self) -> None:
-        path = Path.home() / ".ssh" / "config"
+        path = ssh_config._SSH_CONFIG_PATH
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
-        open_path(path, parent=self)
+        TextFileDialog(self, path, title="Edit ~/.ssh/config").exec()
 
     def _on_add_manual(self) -> None:
         dialog = ManualTunnelDialog(self, taken_names=self._taken_manual_names())
