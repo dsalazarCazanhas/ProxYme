@@ -417,10 +417,7 @@ class TunnelTab(QWidget):
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
-        # ~/.ssh/config has no extension, so OS-level "open with default app"
-        # resolution is often ambiguous and falls back to an app picker —
-        # open_path() tries $VISUAL/$EDITOR first to sidestep that.
-        open_path(path)
+        open_path(path, parent=self)
 
     def _on_add_manual(self) -> None:
         dialog = ManualTunnelDialog(self, taken_names=self._taken_manual_names())

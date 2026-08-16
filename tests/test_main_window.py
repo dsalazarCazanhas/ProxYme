@@ -27,4 +27,4 @@ def test_view_logs_opens_the_most_recent_log_file(main_window, tmp_path, monkeyp
     open_path = mocker.patch("proxyme.qt.main_window.open_path")
     main_window._view_logs()
 
-    open_path.assert_called_once_with(log_file)
+    open_path.assert_called_once_with(log_file, parent=main_window)

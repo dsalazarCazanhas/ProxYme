@@ -72,7 +72,7 @@ class MainWindow(QMainWindow):
         if log_file is None:
             QMessageBox.information(self, "ProxYme", "No log files found yet.")
             return
-        open_path(log_file)
+        open_path(log_file, parent=self)
 
     def _show_about(self) -> None:
         QMessageBox.about(
