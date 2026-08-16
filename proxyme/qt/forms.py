@@ -5,6 +5,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
@@ -116,7 +117,23 @@ class TunnelFieldsForm(QWidget):
             tooltip="Destination port on that remote host.",
         ))
 
-        for row in (self.mode_row, self.local_port_row, self.remote_host_row, self.remote_port_row):
+        self.bind_all_checkbox = QCheckBox("Allow connections from other devices")
+        self.bind_all_row = QWidget()
+        self.bind_all_row.setLayout(labeled_row(
+            "", self.bind_all_checkbox,
+            tooltip=(
+                "Off (default): the tunnel only accepts connections from this machine "
+                "(binds 127.0.0.1) — safest.\n"
+                "On: binds 0.0.0.0, so other devices on your network — or containers "
+                "reaching the host via its bridge IP, e.g. Docker — can connect too. "
+                "Anyone who can reach this machine's network can use the tunnel."
+            ),
+        ))
+
+        for row in (
+            self.mode_row, self.local_port_row, self.remote_host_row,
+            self.remote_port_row, self.bind_all_row,
+        ):
             layout.addWidget(row)
 
     def _on_mode_changed(self, _index: int) -> None:
@@ -134,17 +151,22 @@ class TunnelFieldsForm(QWidget):
         if idx >= 0:
             self.mode_combo.setCurrentIndex(idx)
 
+    def bind_all_interfaces(self) -> bool:
+        return self.bind_all_checkbox.isChecked()
+
     def set_values(
         self,
         mode: TunnelMode | None,
         local_port: int | None,
         remote_host: str | None,
         remote_port: int | None,
+        bind_all_interfaces: bool = False,
     ) -> None:
         self.set_mode(mode)
         self.local_port_field.setText(str(local_port) if local_port is not None else "")
         self.remote_host_field.setText(remote_host or "")
         self.remote_port_field.setText(str(remote_port) if remote_port is not None else "")
+        self.bind_all_checkbox.setChecked(bind_all_interfaces)
 
 
 class AuthMethodFields(QWidget):

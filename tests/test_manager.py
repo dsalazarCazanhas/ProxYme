@@ -7,7 +7,7 @@ from pathlib import Path
 import paramiko
 import pytest
 
-from proxyme.tunnel.manager import TunnelWorker, _Socks5Handler
+from proxyme.tunnel.manager import TunnelWorker, _ForwardServer, _Socks5Handler, _Socks5Server
 from proxyme.tunnel.models import AuthMethod, TunnelConfig, TunnelMode
 
 
@@ -136,6 +136,48 @@ class TestSocks5RecvExact:
         handler = self._FakeHandler(b"")
         with pytest.raises(ConnectionResetError):
             _Socks5Handler._recv_exact(handler, 3)
+
+
+class TestBindAllInterfaces:
+    """bind_all_interfaces controls whether local servers listen on 127.0.0.1
+    (default, safest) or 0.0.0.0 (reachable from other devices/containers)."""
+
+    def _free_port(self) -> int:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()
+        return port
+
+    def test_forward_server_defaults_to_loopback_only(self, mocker):
+        server = _ForwardServer(self._free_port(), mocker.Mock(), "db.internal", 5432)
+        try:
+            assert server.server_address[0] == "127.0.0.1"
+        finally:
+            server.server_close()
+
+    def test_forward_server_binds_all_interfaces_when_requested(self, mocker):
+        server = _ForwardServer(
+            self._free_port(), mocker.Mock(), "db.internal", 5432, bind_all_interfaces=True,
+        )
+        try:
+            assert server.server_address[0] == "0.0.0.0"  # noqa: S104
+        finally:
+            server.server_close()
+
+    def test_socks5_server_defaults_to_loopback_only(self, mocker):
+        server = _Socks5Server(self._free_port(), mocker.Mock())
+        try:
+            assert server.server_address[0] == "127.0.0.1"
+        finally:
+            server.server_close()
+
+    def test_socks5_server_binds_all_interfaces_when_requested(self, mocker):
+        server = _Socks5Server(self._free_port(), mocker.Mock(), bind_all_interfaces=True)
+        try:
+            assert server.server_address[0] == "0.0.0.0"  # noqa: S104
+        finally:
+            server.server_close()
 
 
 class TestLocalBindFailure:

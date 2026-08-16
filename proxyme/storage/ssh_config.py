@@ -60,10 +60,12 @@ def resolve_tunnel(host_alias: str) -> TunnelConfig:
     dynamic_forwards = _as_list(ssh_data.get("dynamicforward"))
 
     if local_forwards:
-        mode, local_port, remote_host, remote_port = _parse_local_forward(local_forwards[0])
+        mode, local_port, remote_host, remote_port, bind_all = _parse_local_forward(
+            local_forwards[0],
+        )
     elif dynamic_forwards:
         mode        = TunnelMode.DYNAMIC
-        local_port  = int(dynamic_forwards[0].strip())
+        bind_all, local_port = _parse_bind_and_port(dynamic_forwards[0])
         remote_host = None
         remote_port = None
     else:
@@ -72,6 +74,7 @@ def resolve_tunnel(host_alias: str) -> TunnelConfig:
         local_port  = _resolve_field("local_port",  None, supplement)
         remote_host = _resolve_field("remote_host", None, supplement)
         remote_port = _resolve_field("remote_port", None, supplement)
+        bind_all    = getattr(supplement, "bind_all_interfaces", False) if supplement else False
 
     # --- Validate critical fields (rebind to narrow Optional away) ---
     ssh_host    = _require(ssh_host,    "ssh_host",    host_alias)
@@ -95,6 +98,7 @@ def resolve_tunnel(host_alias: str) -> TunnelConfig:
         remote_host = remote_host,
         remote_port = remote_port,
         key_path    = _expand_key_path(key_path),
+        bind_all_interfaces = bind_all,
     )
 
 
@@ -122,12 +126,23 @@ def _first(items: list) -> str | None:
     return items[0] if items else None
 
 
+_BIND_ALL_ADDRESSES = {"0.0.0.0", "*"}  # noqa: S104 — recognizing, not choosing, the bind address
+
+
+def _parse_bind_and_port(raw: str) -> tuple[bool, int]:
+    """Parse a "[bind_addr:]port" value (used by DynamicForward, and the local
+    side of LocalForward). Returns (bind_all_interfaces, port)."""
+    bind_addr, _, port_str = raw.strip().rpartition(":")
+    return bind_addr in _BIND_ALL_ADDRESSES, int(port_str)
+
+
 def _parse_local_forward(raw: str):
     """
     Parse a LocalForward value.
     Accepted formats:
       "5432 db.internal:5432"
       "127.0.0.1:5432 db.internal:5432"
+      "0.0.0.0:5432 db.internal:5432"
     """
     parts = raw.strip().split()
     if len(parts) != 2:
@@ -135,14 +150,13 @@ def _parse_local_forward(raw: str):
 
     local_part, remote_part = parts
 
-    # local side — may be "port" or "bind_addr:port"
-    local_port = int(local_part.split(":")[-1])
+    bind_all, local_port = _parse_bind_and_port(local_part)
 
     # remote side — always "host:port"
     remote_host, _, remote_port_str = remote_part.rpartition(":")
     remote_port = int(remote_port_str)
 
-    return TunnelMode.LOCAL, local_port, remote_host, remote_port
+    return TunnelMode.LOCAL, local_port, remote_host, remote_port, bind_all
 
 
 def _expand_key_path(path: str | None) -> str | None:
@@ -202,12 +216,14 @@ def format_host_block(config: TunnelConfig) -> str:
         lines.append(f"    Port {config.ssh_port}")
     if config.auth_method == AuthMethod.PRIVATE_KEY and config.key_path:
         lines.append(f"    IdentityFile {config.key_path}")
+    bind_prefix = "0.0.0.0:" if config.bind_all_interfaces else ""
     if config.mode == TunnelMode.LOCAL:
         lines.append(
-            f"    LocalForward {config.local_port} {config.remote_host}:{config.remote_port}"
+            f"    LocalForward {bind_prefix}{config.local_port} "
+            f"{config.remote_host}:{config.remote_port}"
         )
     elif config.mode == TunnelMode.DYNAMIC:
-        lines.append(f"    DynamicForward {config.local_port}")
+        lines.append(f"    DynamicForward {bind_prefix}{config.local_port}")
     return "\n".join(lines)
 
 
@@ -264,11 +280,13 @@ def resolve_tunnel_partial(host_alias: str) -> dict:
     dynamic_forwards = _as_list(ssh_data.get("dynamicforward"))
 
     if local_forwards:
-        _, local_port, remote_host, remote_port = _parse_local_forward(local_forwards[0])
+        _, local_port, remote_host, remote_port, bind_all = _parse_local_forward(
+            local_forwards[0],
+        )
         mode = TunnelMode.LOCAL
     elif dynamic_forwards:
         mode        = TunnelMode.DYNAMIC
-        local_port  = int(dynamic_forwards[0].strip())
+        bind_all, local_port = _parse_bind_and_port(dynamic_forwards[0])
         remote_host = None
         remote_port = None
     else:
@@ -276,10 +294,12 @@ def resolve_tunnel_partial(host_alias: str) -> dict:
         local_port  = getattr(supplement, "local_port",  None) if supplement else None
         remote_host = getattr(supplement, "remote_host", None) if supplement else None
         remote_port = getattr(supplement, "remote_port", None) if supplement else None
+        bind_all    = getattr(supplement, "bind_all_interfaces", False) if supplement else False
 
     return {
         "mode":        mode,
         "local_port":  local_port,
         "remote_host": remote_host,
         "remote_port": remote_port,
+        "bind_all_interfaces": bind_all,
     }

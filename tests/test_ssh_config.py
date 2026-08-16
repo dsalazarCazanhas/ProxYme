@@ -66,6 +66,51 @@ Host db
     assert config.remote_port == 5432
 
 
+def test_resolve_tunnel_local_forward_bind_all_interfaces(isolated_ssh_config):
+    _write_config(isolated_ssh_config, """
+Host db
+    HostName db.internal
+    LocalForward 0.0.0.0:5432 db.internal:5432
+""")
+    config = resolve_tunnel("db")
+    assert config.bind_all_interfaces is True
+
+
+def test_resolve_tunnel_local_forward_defaults_to_loopback_only(isolated_ssh_config):
+    _write_config(isolated_ssh_config, """
+Host db
+    HostName db.internal
+    LocalForward 5432 db.internal:5432
+""")
+    config = resolve_tunnel("db")
+    assert config.bind_all_interfaces is False
+
+
+def test_resolve_tunnel_dynamic_forward_bind_all_interfaces(isolated_ssh_config):
+    _write_config(isolated_ssh_config, """
+Host proxy
+    HostName proxy.internal
+    DynamicForward 0.0.0.0:1080
+""")
+    config = resolve_tunnel("proxy")
+    assert config.bind_all_interfaces is True
+
+
+def test_resolve_tunnel_uses_supplement_bind_all_interfaces_when_no_forwarding_in_config(
+    isolated_ssh_config, isolated_repository,
+):
+    _write_config(isolated_ssh_config, """
+Host db
+    HostName db.internal
+""")
+    upsert(TunnelSupplement(
+        name="db", mode=TunnelMode.LOCAL, local_port=5432,
+        remote_host="db.internal", remote_port=5432, bind_all_interfaces=True,
+    ))
+    config = resolve_tunnel("db")
+    assert config.bind_all_interfaces is True
+
+
 def test_resolve_tunnel_dynamic_forward(isolated_ssh_config):
     _write_config(isolated_ssh_config, """
 Host proxy
@@ -190,6 +235,7 @@ Host db
     partial = resolve_tunnel_partial("db")
     assert partial == {
         "mode": None, "local_port": None, "remote_host": None, "remote_port": None,
+        "bind_all_interfaces": False,
     }
 
 
@@ -201,6 +247,19 @@ def _make_config(**overrides) -> TunnelConfig:
     }
     defaults.update(overrides)
     return TunnelConfig(**defaults)
+
+
+def test_format_host_block_local_forward_bind_all_interfaces():
+    block = format_host_block(_make_config(bind_all_interfaces=True))
+    assert "    LocalForward 0.0.0.0:5432 db.internal:5432" in block
+
+
+def test_format_host_block_dynamic_forward_bind_all_interfaces():
+    block = format_host_block(_make_config(
+        mode=TunnelMode.DYNAMIC, local_port=1080, remote_host=None, remote_port=None,
+        bind_all_interfaces=True,
+    ))
+    assert "DynamicForward 0.0.0.0:1080" in block
 
 
 def test_format_host_block_local_mode_password_auth():

@@ -147,8 +147,9 @@ class TunnelTab(QWidget):
         self._cd_local_label = QLabel()
         self._cd_rhost_label = QLabel()
         self._cd_rport_label = QLabel()
+        self._cd_bind_label  = QLabel()
         for _lbl in (self._cd_mode_label, self._cd_local_label,
-                     self._cd_rhost_label, self._cd_rport_label):
+                     self._cd_rhost_label, self._cd_rport_label, self._cd_bind_label):
             _lbl.setStyleSheet(_grey)
             cd_layout.addWidget(_lbl)
 
@@ -254,6 +255,7 @@ class TunnelTab(QWidget):
                 "local_port":  config.local_port,
                 "remote_host": config.remote_host,
                 "remote_port": config.remote_port,
+                "bind_all_interfaces": config.bind_all_interfaces,
             })
             self._config_display_widget.setVisible(True)
             return
@@ -276,9 +278,13 @@ class TunnelTab(QWidget):
             self._fields.local_port_row.setVisible("local_port" in gaps)
             self._fields.remote_host_row.setVisible("remote_host" in gaps)
             self._fields.remote_port_row.setVisible("remote_port" in gaps)
+            self._fields.bind_all_row.setVisible(True)
             self._fields.setVisible(True)
 
             supplement = repository.find_by_name(alias)
+            self._fields.bind_all_checkbox.setChecked(
+                supplement.bind_all_interfaces if supplement else False,
+            )
             if supplement:
                 if "local_port" in gaps and supplement.local_port:
                     self._fields.local_port_field.setText(str(supplement.local_port))
@@ -302,6 +308,12 @@ class TunnelTab(QWidget):
         self._cd_rport_label.setVisible(is_local)
         self._cd_rhost_label.setText(f"Remote host: {partial.get('remote_host') or '—'}")
         self._cd_rport_label.setText(f"Remote port: {partial.get('remote_port') or '—'}")
+        if partial.get("bind_all_interfaces"):
+            self._cd_bind_label.setText("Bind:        0.0.0.0 (reachable from other devices)")
+            self._cd_bind_label.setStyleSheet("color: #E6A817;")
+        else:
+            self._cd_bind_label.setText("Bind:        127.0.0.1 (this machine only)")
+            self._cd_bind_label.setStyleSheet("color: #888888;")
 
     def _show_fields_error(self, message: str) -> None:
         self._fields_error_label.setText(message)
@@ -334,6 +346,7 @@ class TunnelTab(QWidget):
         mode = partial.get("mode")
         self._fields.set_values(
             mode, partial.get("local_port"), partial.get("remote_host"), partial.get("remote_port"),
+            partial.get("bind_all_interfaces", False),
         )
 
         self._fields.mode_row.setVisible(True)
@@ -341,6 +354,7 @@ class TunnelTab(QWidget):
         is_local = (mode == TunnelMode.LOCAL) if mode else True
         self._fields.remote_host_row.setVisible(is_local)
         self._fields.remote_port_row.setVisible(is_local)
+        self._fields.bind_all_row.setVisible(True)
         self._fields.setVisible(True)
         self._edit_actions_widget.setVisible(True)
 
@@ -388,6 +402,7 @@ class TunnelTab(QWidget):
             local_port  = local_port,
             remote_host = remote_host,
             remote_port = remote_port,
+            bind_all_interfaces = self._fields.bind_all_interfaces(),
         ))
         _log.info("Tunnel supplement saved for host: %s", alias)
         self._clear_fields_error()
@@ -535,6 +550,7 @@ class TunnelTab(QWidget):
             local_port  = local_port,
             remote_host = remote_host,
             remote_port = remote_port,
+            bind_all_interfaces = self._fields.bind_all_interfaces(),
         ))
         self._clear_fields_error()
         return True

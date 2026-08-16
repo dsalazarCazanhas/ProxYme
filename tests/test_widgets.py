@@ -127,6 +127,19 @@ Host gaphost
         assert saved.local_port == 5432
         assert saved.remote_host == "db.internal"
 
+    def test_saves_bind_all_interfaces_checkbox_state(
+        self, tunnel_tab, isolated_ssh_config, isolated_repository,
+    ):
+        self._make_gap_host(isolated_ssh_config)
+        tunnel_tab._fields.local_port_field.setText("5432")
+        tunnel_tab._fields.remote_host_field.setText("db.internal")
+        tunnel_tab._fields.remote_port_field.setText("5432")
+        tunnel_tab._fields.bind_all_checkbox.setChecked(True)
+
+        assert tunnel_tab._save_tunnel_fields("gaphost") is True
+        saved = repository.find_by_name("gaphost")
+        assert saved.bind_all_interfaces is True
+
     def test_dynamic_mode_does_not_require_remote_fields(
         self, tunnel_tab, isolated_ssh_config, isolated_repository,
     ):

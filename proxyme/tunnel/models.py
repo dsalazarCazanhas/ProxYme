@@ -24,3 +24,4 @@ class TunnelConfig:
     remote_host: str | None  # None when mode=DYNAMIC
     remote_port: int | None  # None when mode=DYNAMIC
     key_path:    str | None  # path to private key file; None when auth_method=PASSWORD
+    bind_all_interfaces: bool = False  # bind 0.0.0.0 instead of 127.0.0.1 (exposes to the LAN)

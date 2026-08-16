@@ -127,6 +127,7 @@ class ManualTunnelDialog(QDialog):
                 self._auth.set_private_key(existing.key_path)
             self._fields.set_values(
                 existing.mode, existing.local_port, existing.remote_host, existing.remote_port,
+                existing.bind_all_interfaces,
             )
 
     # ------------------------------------------------------------------
@@ -194,6 +195,7 @@ class ManualTunnelDialog(QDialog):
             remote_host = remote_host,
             remote_port = remote_port,
             key_path    = key_path,
+            bind_all_interfaces = self._fields.bind_all_interfaces(),
         )
 
     def _on_accept(self) -> None:

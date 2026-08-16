@@ -80,6 +80,30 @@ class TestPortValidation:
         assert config.local_port == 65535
 
 
+class TestBindAllInterfaces:
+    def test_defaults_to_loopback_only(self, dialog):
+        _fill_minimal_local(dialog)
+        config = dialog._try_build_config()
+        assert config.bind_all_interfaces is False
+
+    def test_checkbox_is_carried_into_the_built_config(self, dialog):
+        _fill_minimal_local(dialog)
+        dialog._fields.bind_all_checkbox.setChecked(True)
+        config = dialog._try_build_config()
+        assert config.bind_all_interfaces is True
+
+    def test_editing_prefills_checkbox_from_existing_config(self, qapp):
+        from proxyme.tunnel.models import TunnelConfig
+        existing = TunnelConfig(
+            name="myserver", ssh_host="db.internal", ssh_port=22, ssh_user="alice",
+            auth_method=AuthMethod.PASSWORD, mode=TunnelMode.LOCAL, local_port=5432,
+            remote_host="db.internal", remote_port=5432, key_path=None,
+            bind_all_interfaces=True,
+        )
+        dlg = ManualTunnelDialog(existing=existing)
+        assert dlg._fields.bind_all_checkbox.isChecked() is True
+
+
 class TestDuplicateNames:
     def test_rejects_name_already_taken(self, qapp):
         dlg = ManualTunnelDialog(taken_names={"myserver", "other"})

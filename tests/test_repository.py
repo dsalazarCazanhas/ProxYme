@@ -54,7 +54,9 @@ def test_find_by_name_returns_none_when_absent(isolated_repository):
 def test_supplement_never_stores_credentials(isolated_repository):
     """TunnelSupplement has no field for password/passphrase — guard against regressions."""
     field_names = set(TunnelSupplement.__dataclass_fields__)
-    assert field_names == {"name", "mode", "local_port", "remote_host", "remote_port"}
+    assert field_names == {
+        "name", "mode", "local_port", "remote_host", "remote_port", "bind_all_interfaces",
+    }
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only permission bits")

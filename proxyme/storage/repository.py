@@ -18,6 +18,7 @@ class TunnelSupplement:
     local_port:  int | None        = None
     remote_host: str | None        = None
     remote_port: int | None        = None
+    bind_all_interfaces: bool      = False
 
 
 def _to_dict(s: TunnelSupplement) -> dict:
@@ -27,6 +28,7 @@ def _to_dict(s: TunnelSupplement) -> dict:
         "local_port":  s.local_port,
         "remote_host": s.remote_host,
         "remote_port": s.remote_port,
+        "bind_all_interfaces": s.bind_all_interfaces,
     }
 
 
@@ -38,6 +40,7 @@ def _from_dict(data: dict) -> TunnelSupplement:
         local_port  = data.get("local_port"),
         remote_host = data.get("remote_host"),
         remote_port = data.get("remote_port"),
+        bind_all_interfaces = data.get("bind_all_interfaces", False),
     )
 
 

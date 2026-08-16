@@ -123,9 +123,12 @@ class _Socks5Server(socketserver.ThreadingTCPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, local_port: int, ssh_transport: paramiko.Transport) -> None:
+    def __init__(
+        self, local_port: int, ssh_transport: paramiko.Transport, bind_all_interfaces: bool = False,
+    ) -> None:
         self.ssh_transport = ssh_transport
-        super().__init__(("127.0.0.1", local_port), _Socks5Handler)
+        bind_host = "0.0.0.0" if bind_all_interfaces else "127.0.0.1"  # noqa: S104
+        super().__init__((bind_host, local_port), _Socks5Handler)
 
 
 # ---------------------------------------------------------------------------
@@ -180,11 +183,13 @@ class _ForwardServer(socketserver.ThreadingTCPServer):
         ssh_transport: paramiko.Transport,
         remote_host: str,
         remote_port: int,
+        bind_all_interfaces: bool = False,
     ) -> None:
         self.ssh_transport = ssh_transport
         self.remote_host = remote_host
         self.remote_port = remote_port
-        super().__init__(("127.0.0.1", local_port), _ForwardHandler)
+        bind_host = "0.0.0.0" if bind_all_interfaces else "127.0.0.1"  # noqa: S104
+        super().__init__((bind_host, local_port), _ForwardHandler)
 
 
 # ---------------------------------------------------------------------------
@@ -240,9 +245,13 @@ class TunnelWorker(QObject):
                 self._server = _ForwardServer(
                     self._config.local_port, self._transport,
                     self._config.remote_host, self._config.remote_port,
+                    bind_all_interfaces=self._config.bind_all_interfaces,
                 )
             elif self._config.mode == TunnelMode.DYNAMIC:
-                self._server = _Socks5Server(self._config.local_port, self._transport)
+                self._server = _Socks5Server(
+                    self._config.local_port, self._transport,
+                    bind_all_interfaces=self._config.bind_all_interfaces,
+                )
         except Exception as exc:
             if self._cancelled:
                 _log.info("Connection attempt cancelled by user")
